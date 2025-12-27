@@ -4,11 +4,19 @@ import { worldNoAllocator } from "./worldno.js";
  * Represents the state for a single world
  */
 export class WorldStateEntry {
-  constructor(worldData, worldno = 0) {
+  constructor(worldData, worldUrl, worldno) {
     this.data = worldData;
+    this.url = worldUrl;
+    this.worldno = worldno;
+    this.name = worldData?.name;
+    if(!this.name) {
+      console.error("WorldStateEntry: No name found for world:", this.url);
+    }
+    if(!this.url) {
+      console.error("WorldStateEntry: No url found for world:", this.url);
+    }
     this.mesh = null;
     this.portalPairs = [];
-    this.worldno = worldno;
   }
 }
 
@@ -20,38 +28,38 @@ export class WorldState {
     this.worlds = new Map(); // Map<worldUrl, WorldStateEntry>
   }
 
-  /**
-   * Get world state entry by URL
-   * @param {string} worldUrl 
-   * @returns {WorldStateEntry|null}
-   */
-  get(worldUrl) {
-    return this.worlds.get(worldUrl) || null;
-  }
 
-  /**
-   * Get or create world state entry
-   * @param {string} worldUrl 
-   * @param {object} worldData 
-   * @param {number} worldno 
-   * @returns {WorldStateEntry}
-   */
-  getOrCreate(worldUrl, worldData, worldno = 0) {
+  get(worldUrl) {
     let state = this.worlds.get(worldUrl);
     if (!state) {
-      state = new WorldStateEntry(worldData, worldno);
-      this.worlds.set(worldUrl, state);
+      console.warn("WorldState: get: world not found:", worldUrl);
+      return null;
     }
     return state;
   }
 
-  /**
-   * Set world state entry
-   * @param {string} worldUrl 
-   * @param {WorldStateEntry} state 
-   */
+  create(worldUrl, worldData, worldno = 0) {
+    let state = this.worlds.get(worldUrl);
+    if (state) {
+      console.warn("WorldState: create: world already exists:", worldUrl);
+      return state; // Return existing state instead of null
+    }
+    state = new WorldStateEntry(worldData, worldUrl, worldno);
+    this.worlds.set(worldUrl, state);
+    return state;
+  }
+
   set(worldUrl, state) {
     this.worlds.set(worldUrl, state);
+  }
+
+  getOrCreate(worldUrl, worldData, worldno) {
+    let state = this.worlds.get(worldUrl);
+    if (!state) {
+      console.log('WorldState: creating state for:', worldUrl);
+      state = this.create(worldUrl, worldData, worldno);
+    }
+    return state;
   }
 
   /**

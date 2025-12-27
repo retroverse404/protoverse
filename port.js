@@ -24,6 +24,15 @@ export class ProtoPortal {
   }
 
   async createLabel(worldName, position, rotation) {
+    // Remove existing label if it exists (prevent duplicates)
+    if (this.label) {
+      console.log("createLabel called when label already exists, removing old label");
+      this.scene.remove(this.label);
+      if (this.label.geometry) this.label.geometry.dispose();
+      if (this.label.material) this.label.material.dispose();
+      this.label = null;
+    }
+    
     const font = await fontPromise;
 
     const textGeometry = new TextGeometry(worldName, {
@@ -100,6 +109,7 @@ export class ProtoPortal {
     
     // Remove old geometry
     if (this.label.geometry) {
+      console.log("Disposing old geometry", this.label.geometry);
       this.label.geometry.dispose();
     }
     

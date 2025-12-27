@@ -16,7 +16,8 @@ const stats = new Stats();
 document.body.appendChild(stats.dom);
 
 // Starting point
-let rootworld = "/worlds/cozyship/world.json";
+// let rootworld = "/worlds/cozyship/world.json";
+let rootworld = "https://public-spz.t3.storage.dev/cozyship/world.json";
 // Track current world URL (to world.json)
 let currentWorldUrl = rootworld; // Track current world URL
 
@@ -95,7 +96,7 @@ async function loadWorldJSON(worldUrl) {
 
 async function flushPortalsAndWorlds(fromURL, destinationUrl) {
     console.log("flushPortalsAndWorlds:", fromURL, destinationUrl);
-    console.log("worldState:", worldState);
+
     for (const [worldUrl, state] of worldState.entries()) {
         if (worldUrl !== fromURL && worldUrl !== destinationUrl) {
             console.log("Flushing world:", worldUrl);
@@ -126,7 +127,9 @@ async function flushPortalsAndWorlds(fromURL, destinationUrl) {
                 } else if (protoPortal instanceof ProtoPortal) {
                     console.log("Keeping portal:", protoPortal.destinationUrl);
                     // change the label of the portal to the entry world name
-                    const entryWorldName = fromURL.split("/")[2] || "Unknown";
+                    const entryWorldState = worldState.get(fromURL);
+                    const entryWorldName = entryWorldState?.name || fromURL.split("/")[2] || "Unknown";
+                    console.log("Changing portal label to:", entryWorldName);
                     await protoPortal.updateLabelText(entryWorldName);
                 }
             }
@@ -134,26 +137,48 @@ async function flushPortalsAndWorlds(fromURL, destinationUrl) {
             state.portalPairs = state.portalPairs.filter(p => 
                 !(p instanceof ProtoPortal) || p.destinationUrl === destinationUrl
             );
+        }else if (worldUrl === destinationUrl) {
+            // When returning through a portal, the portal is in the destination world's state
+            // Update the label for the portal that leads back to fromURL
+            console.log("Checking destination world for return portal:", worldUrl);
+            for (const protoPortal of state.portalPairs) {
+                if (protoPortal instanceof ProtoPortal && protoPortal.destinationUrl === fromURL) {
+                    console.log("Updating return portal label to:", fromURL);
+                    const fromWorldState = worldState.get(fromURL);
+                    const fromWorldName = fromWorldState?.name || fromURL.split("/")[2] || "Unknown";
+                    console.log("Changing return portal label to:", fromWorldName);
+                    await protoPortal.updateLabelText(fromWorldName);
+                }
+            }
         }
     }
 }
 
-async function loadPortalsFromWorlData(worldUrl, worldData, fromroot) {
-  console.log("loadPortalsFromWorlData:", worldData);
+async function loadPortalsFromWorlData(worldUrl, fromroot) {
+  // Get world state (must already exist)
+  const state = worldState.get(worldUrl);
+  if (!state) {
+    console.error("loadPortalsFromWorlData: world state not found for", worldUrl);
+    return [];
+  }
   
-  // Get or create world state entry
-  const state = worldState.getOrCreate(worldUrl, worldData, 0);
+  const worldData = state.data;
+  // console.log("loadPortalsFromWorlData:", worldData);
   
-  // Get the current world's worldno
-  const currentWorldno = state.worldno || 0;
+  // should only set up portals once on world load. So check whether this is called again.  
+  if (state.portalPairs.length > 0) {
+    console.warn("loadPortalsFromWorlData: state already has", state.portalPairs.length, "portals for", worldUrl);
+  }
   
   let destMeshes = [];
   for (const portalData of worldData.portals) {
+    console.log("portalData:", portalData);
 
     if(fromroot === portalData.destination.url) {
-        console.log("Skipping portal to previous world:", portalData.destination.url);
+        console.log("Skipping portal to previous world:", portalData.destination.url, "fromroot:", fromroot);
         continue;
     }
+    console.log("Creating portal to:", portalData.destination.url, "fromroot:", fromroot);
 
     // Allocate a world number for this destination world
     const worldno = worldNoAllocator.allocate();
@@ -167,27 +192,29 @@ async function loadPortalsFromWorlData(worldUrl, worldData, fromroot) {
     console.log("destination position:", destination.position);
     
     // Adjust start position from world to universe coordinates
-    const adjustedStartPos = worldToUniverse(start.position, currentWorldno);
+    const adjustedStartPos = worldToUniverse(start.position, state.worldno);
     
     // Adjust destination position from world to universe coordinates
+    // Note: Don't modify destination.position directly as it's stored in state.data
     const adjustedDestPos = worldToUniverse(destination.position, worldno);
-    destination.position[0] = adjustedDestPos.x;
-    destination.position[1] = adjustedDestPos.y;
-    destination.position[2] = adjustedDestPos.z;
     
-    //console.log(start.position[0], start.position[1], start.position[2]);
     pair.entryPortal.position.copy(adjustedStartPos);
     pair.entryPortal.quaternion.fromArray(start.rotation);
-    pair.exitPortal.position.fromArray(destination.position);
+    pair.exitPortal.position.copy(adjustedDestPos);
     pair.exitPortal.quaternion.fromArray(destination.rotation);
 
     // Create ProtoPortal instance
     const protoPortal = new ProtoPortal(pair, destination.url, scene, portals);
     
     // Create text label above portal
-    const destName = destination.url.split("/")[2] || "Unknown";
-    const fromName = worldUrl.split("/")[2] || "Unknown";
-    await protoPortal.createLabel(destName, adjustedStartPos.toArray(), start.rotation);
+    if(!portalData.name){
+        console.error("loadPortalsFromWorlData: portal data has no name:", portalData);
+    }
+    const portalName = portalData.name;
+    await protoPortal.createLabel(portalName, adjustedStartPos.toArray(), start.rotation);
+
+    // create label for return view of portal
+    const fromName = state.name;
     
     // Create gold ring around portal
     protoPortal.createRing(adjustedStartPos.toArray(), start.rotation, 1.0);
@@ -195,12 +222,12 @@ async function loadPortalsFromWorlData(worldUrl, worldData, fromroot) {
     pair.onCross = async (pair, fromEntry) => {
 
         if (fromEntry) {
-            console.log(`Portal callback triggered!`, destName);
+            console.log(`Portal callback triggered from entry! ${fromName} -> ${portalName}`);
             currentWorldUrl = destination.url; // Update current world URL
             await flushPortalsAndWorlds(worldUrl, destination.url);
             await loadWorldAsRoot(destination.url, worldUrl);
         }else{
-            console.log(`Portal callback triggered!`, fromName);
+            console.log(`Portal callback triggered from exit! ${portalName} -> ${fromName}`);
             currentWorldUrl = worldUrl; // Update current world URL
             await flushPortalsAndWorlds(destination.url, worldUrl);
             await loadWorldAsRoot(worldUrl, destination.url);
@@ -210,7 +237,6 @@ async function loadPortalsFromWorlData(worldUrl, worldData, fromroot) {
     // Store ProtoPortal in world state
     state.portalPairs.push(protoPortal);
     
-    console.log(destination.url);
     destMeshes.push([destination.url, worldno]);
   }
   return destMeshes;
@@ -228,6 +254,7 @@ async function loadAdjacentWorlds(worldUrl, destMeshes) {
         const state = worldState.getOrCreate(destWorldUrl, destWorldData, destMesh[1]);
         state.mesh = mesh;
         state.worldno = destMesh[1]; // Ensure worldno is set
+        state.name = destWorldData.name; // Ensure name is set
     }
 }
 
@@ -236,13 +263,24 @@ async function loadWorldAsRoot(url, fromroot) {
     // load JSON file for world
     const worldData = await loadWorldJSON(url);
 
-    const state = worldState.getOrCreate(url, worldData, 0);
+    // TODO: this can be simplified but let's be explicit for now
+    let state = null;
+    if(fromroot == null){
+        state = worldState.create(url, worldData);
+    }else{
+        state = worldState.get(url);
+        if(!state){
+            console.log("loadWorldAsRoot: world state not found for", fromroot," creating");
+            state = worldState.create(url, worldData);
+        }
+    }
+    console.log("loadWorldAsRoot: loaded state for: ", state.name);
 
     // First set up the portals
-    const destMeshes = await loadPortalsFromWorlData(url, worldData, fromroot);
+    const destMeshes = await loadPortalsFromWorlData(url, fromroot);
 
     // Load the root world splat
-    if (!fromroot) {
+    if (fromroot == null) {
         const mesh = await loadSplatandSetPosition(worldData.splatUrl, [0, 0, 0], 0);
         state.mesh = mesh;
     }else{
