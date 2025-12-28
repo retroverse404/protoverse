@@ -157,6 +157,7 @@ export class VerseDag {
    */
   calculateDistances(rootUrl = this.rootUrl) {
     if (!rootUrl || !this.nodes.has(rootUrl)) {
+      console.warn("calculateDisatances called with no root node");
       return new Map();
     }
 
