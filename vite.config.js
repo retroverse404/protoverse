@@ -16,7 +16,7 @@ function getSparkBuildTime() {
   return 'unknown';
 }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   resolve: {
     alias: {
       // Use local spark build from lib directory (included in deployment)
@@ -27,8 +27,9 @@ export default defineConfig({
     port: 3000,
     open: true
   },
-  // Disable public directory copy during build (assets are on CDN)
-  //publicDir: false,
+  // In dev mode: serve from public/ directory for local testing
+  // In build mode: don't copy public/ to dist/ (assets are on CDN)
+  publicDir: command === 'serve' ? 'public' : false,
   build: {
     // Target ES2022 to support top-level await
     target: 'es2022',
@@ -38,5 +39,5 @@ export default defineConfig({
     __PROTOVERSE_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     __SPARK_BUILD_TIME__: JSON.stringify(getSparkBuildTime()),
   },
-});
+}));
 
