@@ -1,0 +1,10 @@
+#!/bin/bash
+# Script to copy the local spark build into this project for deployment
+# Run this whenever you update the spark library locally
+
+echo "Copying spark build files..."
+mkdir -p lib
+cp ../spark/dist/spark.module.js lib/
+cp ../spark/dist/spark.module.js.map lib/ 2>/dev/null || true
+echo "Done! Don't forget to commit the updated lib/ directory."
+

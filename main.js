@@ -3,6 +3,7 @@ import {
   SparkPortals,
   SplatMesh,
   SparkControls,
+  SparkXr,
 } from "@sparkjsdev/spark";
 import Stats from "stats.js";
 import { updateHUD } from "./hud.js";
@@ -11,6 +12,7 @@ import { worldNoAllocator } from "./worldno.js";
 import { WorldState } from "./world-state.js";
 import { worldToUniverse } from "./coordinate-transform.js";
 import { VerseDag } from "./verse-dag.js";
+import { updateDiskAnimation } from "./sparkdisk.js";
 
 // ========== Setup ==========
 const stats = new Stats();
@@ -322,6 +324,9 @@ async function syncWorldsFromDag(newRootUrl, previousRootUrl, portalPair ) {
         
         // Create rings on both sides of the portal
         protoPortal.createRings(1.0);
+        
+        // Create disks for VR mode (hidden by default, shown when in VR)
+        protoPortal.createDisks(1.0);
 
         // Set up crossing callback
         pair.onCross = async (pair, fromEntry) => {
@@ -363,6 +368,31 @@ const controls = new SparkControls({
   canvas: renderer.domElement,
 });
 
+// ========== VR Support ==========
+const ENABLE_VR = true;
+const ANIMATE_PORTAL = true;
+const XR_FRAMEBUFFER_SCALE = 0.5; // Reduce VR resolution for performance
+
+if (ENABLE_VR) {
+  const sparkXr = new SparkXr({
+    renderer,
+    onMouseLeaveOpacity: 0.5,
+    onReady: async (supported) => {
+      console.log(`SparkXr ready: VR ${supported ? "supported" : "not supported"}`);
+    },
+    onEnterXr: () => {
+      console.log("Enter XR");
+    },
+    onExitXr: () => {
+      console.log("Exit XR");
+    },
+    enableHands: true,
+    controllers: {},
+  });
+  renderer.xr.setFramebufferScaleFactor(XR_FRAMEBUFFER_SCALE);
+  window.sparkXr = sparkXr;
+}
+
 // ========== Resize Handler ==========
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -371,8 +401,13 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-renderer.setAnimationLoop(function animate(time) {
+renderer.setAnimationLoop(function animate(time, xrFrame) {
   stats.begin();
+
+  // Update XR controllers (before controls.update)
+  if (window.sparkXr?.updateControllers) {
+    window.sparkXr.updateControllers(camera);
+  }
 
   // Update controls
   controls.update(localFrame);
@@ -386,13 +421,32 @@ renderer.setAnimationLoop(function animate(time) {
   }
   updateHUD(camera, currentWorldUrl, worldno);
 
-  // Update portal labels (rotation animation)
+  // Update portal labels (rotation animation) and VR disk visibility/animation
+  const isInVR = renderer.xr.isPresenting;
+  
+  // Update global disk animation time
+  if (isInVR || ANIMATE_PORTAL) {
+    updateDiskAnimation(time);
+  }
+  
+  const showAnimatedDisks = isInVR || ANIMATE_PORTAL;
   for (const [worldUrl, state] of worldState.entries()) {
     for (const protoPortal of state.portalPairs) {
       if (protoPortal instanceof ProtoPortal) {
         protoPortal.updateLabelRotation(time);
+        // Show/hide animated disks based on VR mode or ANIMATE_PORTAL flag
+        protoPortal.setDisksVisible(showAnimatedDisks);
+        // Update disk animations when visible
+        if (showAnimatedDisks) {
+          protoPortal.updateDisks();
+        }
       }
     }
+  }
+
+  // Update XR hands if active
+  if (window.sparkXr?.updateHands && renderer.xr.isPresenting) {
+    window.sparkXr.updateHands({ xrFrame });
   }
 
   // Update portals and render

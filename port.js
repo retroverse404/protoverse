@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { textSplats } from "@sparkjsdev/spark";
 import { SparkRing } from "./sparkring.js";
+import { SparkDisk } from "./sparkdisk.js";
 
 export class ProtoPortal {
   constructor(portalPair, destinationUrl, scene, portals) {
@@ -12,6 +13,8 @@ export class ProtoPortal {
     this.exitLabel = null;   // Label on exit side (shows source name)
     this.entryRing = null;   // Ring on entry side
     this.exitRing = null;    // Ring on exit side
+    this.entryDisk = null;   // Disk on entry side (for VR mode)
+    this.exitDisk = null;    // Disk on exit side (for VR mode)
   }
 
   /**
@@ -106,6 +109,75 @@ export class ProtoPortal {
     return sparkRing;
   }
 
+  /**
+   * Create disks on both sides of the portal (for VR mode)
+   * Disks are created hidden and should be shown when in VR
+   * @param {number} radius - Radius of the disks (default 1.0)
+   */
+  createDisks(radius = 1.0) {
+    // Get positions and rotations from the portal pair
+    const entryPos = this.pair.entryPortal.position;
+    const entryRot = this.pair.entryPortal.quaternion;
+    const exitPos = this.pair.exitPortal.position;
+    const exitRot = this.pair.exitPortal.quaternion;
+
+    // Create entry disk
+    this.entryDisk = this._createDisk(entryPos, entryRot, radius);
+    
+    // Create exit disk
+    this.exitDisk = this._createDisk(exitPos, exitRot, radius);
+    
+    // Start hidden (only shown in VR mode)
+    this.setDisksVisible(false);
+  }
+
+  _createDisk(position, quaternion, radius) {
+    // Create a disk using procedural splats
+    const sparkDisk = new SparkDisk({
+      radius: radius,
+      radialSegments: 32,
+      concentricRings: 16,
+      color: new THREE.Color(0x000000), // Black color
+      opacity: 1.0
+    });
+
+    const diskMesh = sparkDisk.getMesh();
+    
+    // Position at portal location
+    diskMesh.position.copy(position);
+    
+    // Apply portal rotation
+    diskMesh.quaternion.copy(quaternion);
+
+    this.scene.add(diskMesh);
+    return sparkDisk;
+  }
+
+  /**
+   * Show or hide the VR disks
+   * @param {boolean} visible 
+   */
+  setDisksVisible(visible) {
+    if (this.entryDisk) {
+      this.entryDisk.setVisible(visible);
+    }
+    if (this.exitDisk) {
+      this.exitDisk.setVisible(visible);
+    }
+  }
+
+  /**
+   * Update disk animations - call every frame when disks are visible
+   */
+  updateDisks() {
+    if (this.entryDisk) {
+      this.entryDisk.update();
+    }
+    if (this.exitDisk) {
+      this.exitDisk.update();
+    }
+  }
+
   dispose() {
     // Remove portal pair
     if (this.pair && this.portals) {
@@ -144,6 +216,22 @@ export class ProtoPortal {
       this.scene.remove(ringMesh);
       this.exitRing.dispose();
       this.exitRing = null;
+    }
+
+    // Remove and dispose entry disk
+    if (this.entryDisk) {
+      const diskMesh = this.entryDisk.getMesh();
+      this.scene.remove(diskMesh);
+      this.entryDisk.dispose();
+      this.entryDisk = null;
+    }
+
+    // Remove and dispose exit disk
+    if (this.exitDisk) {
+      const diskMesh = this.exitDisk.getMesh();
+      this.scene.remove(diskMesh);
+      this.exitDisk.dispose();
+      this.exitDisk = null;
     }
   }
 }
