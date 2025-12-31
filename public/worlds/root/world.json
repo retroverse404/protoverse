@@ -3,7 +3,7 @@
   "splatUrl": "/root/splats/root-lod-0.spz",
   "bgAudioUrl": "/root/start-bg.mp3",
   "position": [0.05, -0.48, -1.71],
-  "rotation": [0, -1.59, 0, 0],
+  "rotation": [0, 0.7071, 0, 0.7071],
   "portals": [
     {
       "name": "Sunken Ship",

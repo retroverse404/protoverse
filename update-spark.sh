@@ -6,5 +6,7 @@ echo "Copying spark build files..."
 mkdir -p lib
 cp ../spark/dist/spark.module.js lib/
 cp ../spark/dist/spark.module.js.map lib/ 2>/dev/null || true
+# Copy WASM file (loaded relative to spark.module.js)
+cp ../spark/rust/spark-internal-rs/pkg/spark_internal_rs_bg.wasm lib/
 echo "Done! Don't forget to commit the updated lib/ directory."
 

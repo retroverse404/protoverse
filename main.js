@@ -4,6 +4,7 @@ import { initControls, createAnimationLoop } from "./controls.js";
 import { ProtoVerse } from "./proto.js";
 import { ProtoScene, loadWorldJSON } from "./scene.js";
 import { createUrlResolver } from "./paths.js";
+import { ProtoverseMultiplayer } from "./multiplayer.js";
 
 
 const USE_CDN = true;
@@ -37,7 +38,15 @@ const protoVerse = new ProtoVerse(protoScene, {
         // Handle world change (e.g., play audio)
         setCurrentWorldData(worldData);
         playWorldAudio(worldData);
+        // Join the matching multiplayer room when world changes
+        multiplayer.joinWorld(worldUrl, playerName);
     }
+});
+
+// ========== Multiplayer Setup ==========
+const playerName = `player-${Math.floor(Math.random() * 10000)}`;
+const multiplayer = new ProtoverseMultiplayer(protoScene.getScene(), {
+    wsUrl: import.meta.env?.VITE_WS_URL,
 });
 
 // Start of Execution Here 
@@ -56,10 +65,9 @@ localFrame.quaternion.fromArray(initialWorldData.rotation);
 createAudioToggleButton(handleAudioToggle);
 
 // ========== Controls & VR Setup ==========
-const ANIMATE_PORTAL = true;
 const { controls, sparkXr } = initControls(renderer, camera, localFrame, {
     enableVr: true,
-    animatePortal: ANIMATE_PORTAL,
+    animatePortal: true,
     xrFramebufferScale: 0.5,
 });
 
@@ -80,7 +88,15 @@ const animationLoop = createAnimationLoop({
     updateHUD: () => updateHUD(camera, protoVerse, rootworld),
     updatePortals: () => protoVerse.updatePortals(),
     updatePortalDisks: (time, isInVR, animatePortal) => protoVerse.updatePortalDisks(time, isInVR, animatePortal),
-    animatePortal: ANIMATE_PORTAL,
+    updateMultiplayer: (time) => {
+        multiplayer.update(
+            time,
+            localFrame.position.toArray(),
+            localFrame.quaternion.toArray(),
+            { playerName }
+        );
+    },
+    animatePortal: true,
 });
 
 renderer.setAnimationLoop(animationLoop);

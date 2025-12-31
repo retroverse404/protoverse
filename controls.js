@@ -77,6 +77,7 @@ export function initControls(renderer, camera, localFrame, config = {}) {
  * @param {Function} params.updateHUD - Function to update HUD
  * @param {Function} params.updatePortals - Function to update portals
  * @param {Function} params.updatePortalDisks - Function to update portal disks
+ * @param {Function} params.updateMultiplayer - Function to update multiplayer (optional)
  * @param {boolean} params.animatePortal - Whether to animate portals
  * @returns {Function} Animation loop callback function
  */
@@ -90,6 +91,7 @@ export function createAnimationLoop({
     updateHUD,
     updatePortals,
     updatePortalDisks,
+    updateMultiplayer,
     animatePortal = true
 }) {
     return function animate(time, xrFrame) {
@@ -109,6 +111,11 @@ export function createAnimationLoop({
         // Update portal animations and VR disk visibility
         const isInVR = renderer.xr.isPresenting;
         updatePortalDisks(time, isInVR, animatePortal);
+
+        // Update multiplayer (send position, animate peer avatars)
+        if (updateMultiplayer) {
+            updateMultiplayer(time);
+        }
 
         // Update XR hands if active
         if (sparkXr?.updateHands && isInVR) {
