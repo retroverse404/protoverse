@@ -2,6 +2,10 @@ import * as THREE from "three";
 import { SplatMesh } from "@sparkjsdev/spark";
 import { worldToUniverse } from "./coordinate-transform.js";
 import { setupPortalLighting } from "./port.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+
+// GLTFLoader instance for loading collision meshes
+const gltfLoader = new GLTFLoader();
 
 /**
  * ProtoScene - Manages the Three.js scene, camera, renderer, and local frame
@@ -105,6 +109,72 @@ export class ProtoScene {
         this.scene.add(mesh);
         console.log("Loaded", url);
         return mesh;
+    }
+
+    /**
+     * Load a collision mesh (GLB) and set its position
+     * @param {string} url - URL to the GLB file
+     * @param {number} world - World number (0 for root world)
+     * @param {boolean} visible - Initial visibility (default false)
+     * @returns {Promise<THREE.Group>} The loaded collision mesh
+     */
+    async loadCollisionMesh(url, world = 0, visible = false) {
+        console.log("Loading collision mesh:", url);
+
+        const absoluteURL = new URL(url, window.location.href).href;
+
+        return new Promise((resolve, reject) => {
+            gltfLoader.load(
+                absoluteURL,
+                (gltf) => {
+                    const collisionMesh = gltf.scene;
+                    
+                    // Apply wireframe material to all meshes for debugging visibility
+                    collisionMesh.traverse((child) => {
+                        if (child.isMesh) {
+                            child.material = new THREE.MeshBasicMaterial({
+                                color: 0x00ff00,
+                                wireframe: true,
+                                transparent: true,
+                                opacity: 0.5
+                            });
+                        }
+                    });
+                    
+                    // Transform to universe coordinates if not root world
+                    if (world !== 0) {
+                        const universePos = worldToUniverse(collisionMesh.position, world);
+                        collisionMesh.position.copy(universePos);
+                    }
+                    
+                    // Set initial visibility
+                    collisionMesh.visible = visible;
+                    
+                    this.scene.add(collisionMesh);
+                    
+                    // Debug: log mesh info
+                    let meshCount = 0;
+                    collisionMesh.traverse((child) => {
+                        if (child.isMesh) meshCount++;
+                    });
+                    console.log("Loaded collision mesh:", url);
+                    console.log("  Contains", meshCount, "mesh(es)");
+                    console.log("  Position:", collisionMesh.position.toArray());
+                    console.log("  Visible:", collisionMesh.visible);
+                    
+                    resolve(collisionMesh);
+                },
+                (progress) => {
+                    if (progress.total) {
+                        console.log(`Loading collision mesh: ${(progress.loaded / progress.total * 100).toFixed(0)}%`);
+                    }
+                },
+                (error) => {
+                    console.error("Error loading collision mesh:", url, error);
+                    reject(error);
+                }
+            );
+        });
     }
 }
 

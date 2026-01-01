@@ -151,10 +151,23 @@
     <div class="toolbar-group">
       <h3>2. Downsample</h3>
       <div class="prop-row">
+        <label>Opacity Cutoff <span class="value" id="opacity-threshold-value">0.05</span></label>
+        <input type="range" id="opacity-threshold" min="0" max="1" step="0.01" value="0.05" oninput="updateOpacityThreshold()">
+      </div>
+      <div class="prop-row">
         <label>Sample Rate <span class="value" id="sample-rate-value">10%</span></label>
         <input type="range" id="sample-rate" min="1" max="100" value="10" oninput="updateSampleRate()">
       </div>
+      <div class="stats-row"><span class="label">After opacity:</span> <span class="value" id="stat-filtered">-</span></div>
       <div class="stats-row"><span class="label">Points used:</span> <span class="value" id="stat-points">-</span></div>
+    </div>
+
+    <div class="toolbar-group">
+      <h3>2b. Controls</h3>
+      <div class="prop-row">
+        <label>Move Speed <span class="value" id="move-speed-value">1.0</span></label>
+        <input type="range" id="move-speed" min="0.1" max="5" step="0.1" value="1" oninput="updateMoveSpeed()">
+      </div>
     </div>
     
     <div class="toolbar-group">
@@ -190,7 +203,19 @@
     </div>
     
     <div class="toolbar-group">
-      <h3>5. Export</h3>
+      <h3>5. Erase Tool</h3>
+      <div class="toggle-row">
+        <input type="checkbox" id="erase-mode" onchange="toggleEraseMode()">
+        <label for="erase-mode">Enable Erase Mode</label>
+      </div>
+      <div class="prop-row">
+        <label>Eraser Size <span class="value" id="eraser-size-value">0.5</span></label>
+        <input type="range" id="eraser-size" min="0.1" max="3" step="0.1" value="0.5" oninput="updateEraserSize()">
+      </div>
+    </div>
+    
+    <div class="toolbar-group">
+      <h3>6. Export</h3>
       <button class="btn primary" id="export-btn" onclick="exportGLB()" disabled>Export .glb</button>
     </div>
   </div>
@@ -234,6 +259,8 @@
     localFrame.add(camera);
     localFrame.position.set(5, 5, 5);
 
+    let moveSpeedScalar = 1.0;
+
     const controls = new SparkControls({
       renderer,
       canvas: renderer.domElement,
@@ -264,10 +291,39 @@
     scene.add(dirLight);
     
     // ========== State ==========
-    let allSplatPositions = []; // All positions from the splat file
-    let sampledPositions = []; // Downsampled positions
+    let allSplats = []; // { pos: Vector3, alpha: number }
+    let sampledPositions = []; // Downsampled positions (Vector3)
     let pointsCloud = null; // THREE.Points for visualization
     let generatedMesh = null; // Generated collision mesh
+    
+    // ========== Eraser State ==========
+    let eraserMode = false;
+    let eraserSize = 0.5;
+    let eraserSphere = null;
+    let isErasing = false;
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    
+    // Create eraser sphere (initially hidden)
+    const eraserGeometry = new THREE.SphereGeometry(1, 16, 16);
+    const eraserMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff4444,
+      transparent: true,
+      opacity: 0.3,
+      depthTest: true,
+      depthWrite: false
+    });
+    eraserSphere = new THREE.Mesh(eraserGeometry, eraserMaterial);
+    eraserSphere.visible = false;
+    eraserSphere.scale.setScalar(eraserSize); // Set initial size
+    scene.add(eraserSphere);
+    
+    // Add wireframe outline to eraser sphere for better visibility
+    const eraserWireframe = new THREE.LineSegments(
+      new THREE.WireframeGeometry(eraserGeometry),
+      new THREE.LineBasicMaterial({ color: 0xff0000, opacity: 0.8, transparent: true })
+    );
+    eraserSphere.add(eraserWireframe);
     
     // ========== File Loading ==========
     const fileInput = document.getElementById('file-input');
@@ -322,17 +378,19 @@
           return;
         }
         
-        // Extract all splat positions
-        allSplatPositions = [];
+        // Extract all splat positions + opacity
+        allSplats = [];
         for (let i = 0; i < numSplats; i++) {
           const splat = packedSplats.getSplat(i);
           const pos = splat.center;
           if (pos && isFinite(pos.x) && isFinite(pos.y) && isFinite(pos.z)) {
-            allSplatPositions.push(new THREE.Vector3(pos.x, pos.y, pos.z));
+            // Spark splats carry opacity; fall back to rgba.a if needed
+            const opacity = splat.opacity ?? splat.rgba?.a ?? 1;
+            allSplats.push({ pos: new THREE.Vector3(pos.x, pos.y, pos.z), alpha: opacity });
           }
         }
         
-        console.log('Extracted', allSplatPositions.length, 'valid positions');
+        console.log('Extracted', allSplats.length, 'valid positions');
         
         // Dispose the SplatMesh - we only needed the positions
         splatMesh.dispose();
@@ -355,14 +413,20 @@
     // ========== Sampling ==========
     function updateSampledPositions() {
       const sampleRate = parseInt(document.getElementById('sample-rate').value) / 100;
-      const numSamples = Math.max(1, Math.floor(allSplatPositions.length * sampleRate));
+      const opacityThreshold = parseFloat(document.getElementById('opacity-threshold').value);
+
+      // Filter by opacity
+      const filtered = allSplats.filter(s => s.alpha >= opacityThreshold);
+      document.getElementById('stat-filtered').textContent = filtered.length.toLocaleString();
+
+      const numSamples = Math.max(1, Math.floor(filtered.length * sampleRate));
       
-      // Random sampling
+      // Uniform step sampling
       sampledPositions = [];
-      const step = Math.max(1, Math.floor(allSplatPositions.length / numSamples));
+      const step = Math.max(1, Math.floor(filtered.length / numSamples));
       
-      for (let i = 0; i < allSplatPositions.length; i += step) {
-        sampledPositions.push(allSplatPositions[i]);
+      for (let i = 0; i < filtered.length; i += step) {
+        sampledPositions.push(filtered[i].pos);
       }
       
       document.getElementById('stat-points').textContent = sampledPositions.length.toLocaleString();
@@ -984,6 +1048,18 @@
       document.getElementById('sample-rate-value').textContent = val + '%';
       updateSampledPositions();
     };
+
+    window.updateOpacityThreshold = function() {
+      const val = document.getElementById('opacity-threshold').value;
+      document.getElementById('opacity-threshold-value').textContent = parseFloat(val).toFixed(2);
+      updateSampledPositions();
+    };
+
+    window.updateMoveSpeed = function() {
+      const val = parseFloat(document.getElementById('move-speed').value);
+      moveSpeedScalar = val;
+      document.getElementById('move-speed-value').textContent = val.toFixed(1);
+    };
     
     window.updateVoxelRes = function() {
       const val = document.getElementById('voxel-resolution').value;
@@ -994,6 +1070,127 @@
       const val = parseFloat(document.getElementById('fill-radius').value);
       document.getElementById('fill-radius-value').textContent = val.toFixed(1);
     };
+    
+    // ========== Eraser Functions ==========
+    window.toggleEraseMode = function() {
+      eraserMode = document.getElementById('erase-mode').checked;
+      eraserSphere.visible = eraserMode;
+      
+      // Only disable pointer/mouse controls when in erase mode, keep WASD movement
+      if (controls.pointerControls) controls.pointerControls.enable = !eraserMode;
+      // fpsMovement (WASD) stays enabled so you can navigate while erasing
+      
+      if (eraserMode) {
+        setStatus('Erase mode: Click and drag on mesh to erase (WASD still moves camera)');
+        container.style.cursor = 'crosshair';
+      } else {
+        setStatus('Erase mode disabled');
+        container.style.cursor = 'grab';
+      }
+    };
+    
+    window.updateEraserSize = function() {
+      eraserSize = parseFloat(document.getElementById('eraser-size').value);
+      document.getElementById('eraser-size-value').textContent = eraserSize.toFixed(1);
+      eraserSphere.scale.setScalar(eraserSize);
+    };
+    
+    // Update eraser sphere position based on mouse/raycast
+    function updateEraserPosition(event) {
+      if (!eraserMode) return;
+      
+      const rect = container.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      raycaster.setFromCamera(mouse, camera);
+      
+      // First try to intersect with the generated mesh
+      if (generatedMesh && generatedMesh.visible) {
+        const intersects = raycaster.intersectObject(generatedMesh);
+        if (intersects.length > 0) {
+          eraserSphere.position.copy(intersects[0].point);
+          return;
+        }
+      }
+      
+      // If no mesh hit, place sphere at a fixed distance along ray
+      const point = raycaster.ray.at(10, new THREE.Vector3());
+      eraserSphere.position.copy(point);
+    }
+    
+    // Erase triangles within the eraser sphere
+    function eraseAtPosition() {
+      if (!eraserMode || !generatedMesh) return;
+      
+      const geometry = generatedMesh.geometry;
+      const position = geometry.getAttribute('position');
+      const index = geometry.getIndex();
+      
+      if (!index) return; // Non-indexed geometry not supported
+      
+      const eraserPos = eraserSphere.position;
+      const eraserRadiusSq = eraserSize * eraserSize;
+      
+      const indices = index.array;
+      const positions = position.array;
+      const newIndices = [];
+      
+      // Check each triangle
+      for (let i = 0; i < indices.length; i += 3) {
+        const i0 = indices[i];
+        const i1 = indices[i + 1];
+        const i2 = indices[i + 2];
+        
+        // Get triangle vertices
+        const v0 = new THREE.Vector3(positions[i0 * 3], positions[i0 * 3 + 1], positions[i0 * 3 + 2]);
+        const v1 = new THREE.Vector3(positions[i1 * 3], positions[i1 * 3 + 1], positions[i1 * 3 + 2]);
+        const v2 = new THREE.Vector3(positions[i2 * 3], positions[i2 * 3 + 1], positions[i2 * 3 + 2]);
+        
+        // Check if any vertex is within eraser sphere
+        const inSphere = 
+          v0.distanceToSquared(eraserPos) < eraserRadiusSq ||
+          v1.distanceToSquared(eraserPos) < eraserRadiusSq ||
+          v2.distanceToSquared(eraserPos) < eraserRadiusSq;
+        
+        // Keep triangle if NOT in sphere
+        if (!inSphere) {
+          newIndices.push(i0, i1, i2);
+        }
+      }
+      
+      // Update geometry with new indices
+      geometry.setIndex(newIndices);
+      geometry.computeBoundingSphere();
+      
+      // Update stats
+      document.getElementById('stat-tris').textContent = (newIndices.length / 3).toLocaleString();
+    }
+    
+    // Mouse event handlers for eraser
+    container.addEventListener('mousemove', (e) => {
+      updateEraserPosition(e);
+      if (isErasing) {
+        eraseAtPosition();
+      }
+    });
+    
+    container.addEventListener('mousedown', (e) => {
+      if (eraserMode && e.button === 0) {
+        isErasing = true;
+        eraseAtPosition();
+      }
+    });
+    
+    container.addEventListener('mouseup', (e) => {
+      if (e.button === 0) {
+        isErasing = false;
+      }
+    });
+    
+    container.addEventListener('mouseleave', () => {
+      isErasing = false;
+    });
     
     window.togglePoints = function() {
       if (pointsCloud) {
@@ -1071,6 +1268,11 @@
     function animate(time) {
       const delta = (time - lastTime) || 16;
       lastTime = time;
+
+      // Scale movement speed via SparkControls' fpsMovement.moveSpeed
+      if (controls?.fpsMovement) {
+        controls.fpsMovement.moveSpeed = moveSpeedScalar;
+      }
 
       // Update SparkControls
       controls.update(camera);

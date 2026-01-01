@@ -78,6 +78,7 @@ export function initControls(renderer, camera, localFrame, config = {}) {
  * @param {Function} params.updatePortals - Function to update portals
  * @param {Function} params.updatePortalDisks - Function to update portal disks
  * @param {Function} params.updateMultiplayer - Function to update multiplayer (optional)
+ * @param {Function} params.updatePhysics - Function to update physics (optional)
  * @param {boolean} params.animatePortal - Whether to animate portals
  * @returns {Function} Animation loop callback function
  */
@@ -92,18 +93,30 @@ export function createAnimationLoop({
     updatePortals,
     updatePortalDisks,
     updateMultiplayer,
+    updatePhysics,
     animatePortal = true
 }) {
+    let lastTime = performance.now();
+    
     return function animate(time, xrFrame) {
         stats.begin();
+        
+        // Calculate delta time in seconds
+        const deltaTime = (time - lastTime) / 1000;
+        lastTime = time;
 
         // Update XR controllers (before controls.update)
         if (sparkXr?.updateControllers) {
             sparkXr.updateControllers(camera);
         }
 
-        // Update movement controls
+        // Update movement controls (may be disabled when physics is on)
         controls.update(localFrame);
+        
+        // Update physics (if enabled)
+        if (updatePhysics) {
+            updatePhysics(deltaTime);
+        }
 
         // Update HUD
         updateHUD();

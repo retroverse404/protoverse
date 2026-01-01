@@ -16,6 +16,7 @@ export class WorldStateEntry {
       console.error("WorldStateEntry: No url found for world:", this.url);
     }
     this.mesh = null;
+    this.collisionMesh = null;
     this.portalPairs = [];
   }
 }

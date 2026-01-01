@@ -73,7 +73,7 @@ export async function playWorldAudio(worldData) {
         // Create and play audio
         currentAudio = new Audio(newAudioUrl);
         currentAudio.loop = true; // Loop the background audio
-        currentAudio.volume = 0.5; // Set volume (0.0 to 1.0)
+        currentAudio.volume = 0.25; // Set volume (0.0 to 1.0)
         
         // Play with error handling
         await currentAudio.play().catch(error => {

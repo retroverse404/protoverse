@@ -1,6 +1,7 @@
 {
   "name": "Hobbit House",
   "splatUrl": "/hobbit/splats/cozy_cottage-lod-0.spz",
+  "collisionUrl": "/hobbit/hobbit.glb",
   "portals": [
   ]
 }

@@ -6,6 +6,8 @@ import { worldNoAllocator } from "./worldno.js";
 import { worldToUniverse } from "./coordinate-transform.js";
 import { loadWorldJSON } from "./scene.js";
 import { updateDiskAnimation } from "./sparkdisk.js";
+import { onCollisionMeshToggle, getCollisionMeshVisible } from "./hud.js";
+import { addCollisionMesh, removeCollisionMesh, isPhysicsInitialized, syncPlayerToLocalFrame } from "./physics.js";
 
 /**
  * Configuration options for ProtoVerse
@@ -55,6 +57,28 @@ export class ProtoVerse {
                 coneFoveate: 0.3,
             },
         });
+        
+        // Register for collision mesh toggle events
+        onCollisionMeshToggle((visible) => {
+            console.log("Collision mesh toggle event received, visible:", visible);
+            this._updateAllCollisionMeshVisibility(visible);
+        });
+    }
+
+    /**
+     * Update visibility of all collision meshes
+     * @param {boolean} visible - Whether to show collision meshes
+     */
+    _updateAllCollisionMeshVisibility(visible) {
+        let count = 0;
+        for (const [worldUrl, state] of this.worldState.entries()) {
+            if (state.collisionMesh) {
+                console.log("Setting collision mesh visibility for", worldUrl, "to", visible);
+                state.collisionMesh.visible = visible;
+                count++;
+            }
+        }
+        console.log("Updated", count, "collision mesh(es)");
     }
 
     /**
@@ -184,6 +208,16 @@ export class ProtoVerse {
                     state.mesh = null;
                 }
                 
+                // Remove collision mesh from scene and physics
+                if (state.collisionMesh) {
+                    // Remove from physics first
+                    if (isPhysicsInitialized()) {
+                        removeCollisionMesh(state.collisionMesh);
+                    }
+                    this.scene.remove(state.collisionMesh);
+                    state.collisionMesh = null;
+                }
+                
                 this.worldState.delete(worldUrl);
             }
         }
@@ -192,6 +226,11 @@ export class ProtoVerse {
         for (const node of plan.worldsToLoad) {
             const worldUrl = node.url;
             const worldData = node.worldData; // Already loaded in Phase 1
+            
+            // Debug: log worldData to verify it has all fields
+            console.log("Processing world:", worldUrl);
+            console.log("  worldData keys:", worldData ? Object.keys(worldData) : "null");
+            console.log("  collisionUrl:", worldData?.collisionUrl);
             
             // Skip mesh loading if already loaded
             if (this.worldState.has(worldUrl) && this.worldState.get(worldUrl).mesh) {
@@ -221,6 +260,35 @@ export class ProtoVerse {
                 const mesh = await this.protoScene.loadSplatandSetPosition(splatUrl, [0, 0, 0], worldno);
                 state.mesh = mesh;
                 console.log("  Mesh position:", mesh.position.toArray());
+            }
+            
+            // Load collision mesh if not already loaded and collisionUrl is present
+            if (!state.collisionMesh && worldData.collisionUrl) {
+                console.log("Loading collision mesh for:", worldUrl);
+                console.log("  collisionUrl from JSON:", worldData.collisionUrl);
+                try {
+                    const collisionUrl = worldData.collisionUrl.startsWith('http')
+                        ? worldData.collisionUrl
+                        : this._resolveUrl(worldData.collisionUrl);
+                    console.log("  Resolved collision URL:", collisionUrl);
+                    const collisionMesh = await this.protoScene.loadCollisionMesh(
+                        collisionUrl,
+                        worldno,
+                        getCollisionMeshVisible() // Use current visibility state
+                    );
+                    state.collisionMesh = collisionMesh;
+                    console.log("  Collision mesh loaded successfully, mesh:", collisionMesh);
+                    
+                    // Register collision mesh with physics system
+                    if (isPhysicsInitialized()) {
+                        console.log("  Registering collision mesh with physics...");
+                        addCollisionMesh(collisionMesh, worldno);
+                    }
+                } catch (error) {
+                    console.error("Failed to load collision mesh for:", worldUrl, error);
+                }
+            } else if (!worldData.collisionUrl) {
+                console.log("No collisionUrl specified for:", worldUrl);
             }
         }
 
@@ -319,6 +387,9 @@ export class ProtoVerse {
                     protoVerse.currentWorldUrl = destUrl;
                     await protoVerse.syncWorldsFromDag(destUrl, sourceUrl);
                     
+                    // Sync physics body to new position (prevents snapping back)
+                    syncPlayerToLocalFrame();
+                    
                     // Call world change callback if provided
                     if (protoVerse.config.onWorldChange) {
                         const destNode = protoVerse.verseDag.getWorld(destUrl);
@@ -330,6 +401,9 @@ export class ProtoVerse {
                     console.log(`Portal crossed (reverse): ${destLabelText} -> ${sourceLabelText}`);
                     protoVerse.currentWorldUrl = sourceUrl;
                     await protoVerse.syncWorldsFromDag(sourceUrl, destUrl);
+                    
+                    // Sync physics body to new position (prevents snapping back)
+                    syncPlayerToLocalFrame();
                     
                     // Call world change callback if provided
                     if (protoVerse.config.onWorldChange) {
@@ -357,6 +431,9 @@ export class ProtoVerse {
      * @param {Object} worldData - Root world data
      */
     async initialize(rootUrl, worldData) {
+        console.log("ProtoVerse.initialize called with:", rootUrl);
+        console.log("  worldData keys:", worldData ? Object.keys(worldData) : "null");
+        console.log("  worldData.collisionUrl:", worldData?.collisionUrl);
         this.verseDag.loadWorldData(rootUrl, worldData);
         await this.syncWorldsFromDag(rootUrl, null);
         this.currentWorldUrl = rootUrl;

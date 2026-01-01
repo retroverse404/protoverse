@@ -1,6 +1,7 @@
 {
   "name": "Root",
   "splatUrl": "/root/splats/root-lod-0.spz",
+  "collisionUrl": "/root/root.glb",
   "bgAudioUrl": "/root/start-bg.mp3",
   "position": [0.05, -0.48, -1.71],
   "rotation": [0, 0.7071, 0, 0.7071],

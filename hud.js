@@ -46,6 +46,11 @@ document.body.appendChild(hud);
 let audioEnabled = true; // Default to audio on
 let audioToggleCallback = null; // Callback function when audio is toggled
 
+// ========== Collision Mesh Toggle ==========
+let collisionMeshVisible = false; // Default to hidden
+let collisionMeshToggleCallback = null;
+const collisionMeshListeners = new Set();
+
 /**
  * Create audio toggle button in upper left
  * @param {Function} onToggle - Callback function called when audio is toggled (receives new state: boolean)
@@ -119,6 +124,199 @@ export function getAudioEnabled() {
 export function setAudioEnabled(enabled) {
     audioEnabled = enabled;
     updateAudioToggleButton();
+}
+
+// ========== Collision Mesh Toggle Functions ==========
+
+/**
+ * Create collision mesh toggle button (below audio toggle)
+ * @param {Function} onToggle - Callback function called when collision mesh visibility is toggled
+ */
+export function createCollisionMeshToggleButton(onToggle) {
+    collisionMeshToggleCallback = onToggle;
+    
+    const button = document.createElement("button");
+    button.id = "collision-toggle";
+    button.style.cssText = `
+        position: fixed;
+        top: 60px;
+        left: 10px;
+        width: 40px;
+        height: 40px;
+        background: rgba(0, 0, 0, 0.7);
+        border: 2px solid rgba(255, 255, 255, 0.5);
+        border-radius: 50%;
+        color: white;
+        font-size: 18px;
+        cursor: pointer;
+        z-index: 1001;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    `;
+    button.addEventListener("click", () => {
+        collisionMeshVisible = !collisionMeshVisible;
+        console.log("Collision toggle clicked, new state:", collisionMeshVisible);
+        console.log("  Notifying", collisionMeshListeners.size, "listener(s)");
+        updateCollisionMeshToggleButton();
+        if (collisionMeshToggleCallback) {
+            collisionMeshToggleCallback(collisionMeshVisible);
+        }
+        // Notify all registered listeners
+        collisionMeshListeners.forEach(cb => cb(collisionMeshVisible));
+    });
+    button.addEventListener("mouseenter", () => {
+        button.style.background = "rgba(0, 0, 0, 0.9)";
+        button.style.borderColor = "rgba(255, 255, 255, 0.8)";
+    });
+    button.addEventListener("mouseleave", () => {
+        button.style.background = "rgba(0, 0, 0, 0.7)";
+        button.style.borderColor = "rgba(255, 255, 255, 0.5)";
+    });
+    
+    updateCollisionMeshToggleButton(button);
+    document.body.appendChild(button);
+}
+
+/**
+ * Update the collision mesh toggle button icon
+ */
+function updateCollisionMeshToggleButton(button = null) {
+    const btn = button || document.getElementById("collision-toggle");
+    if (!btn) return;
+    
+    // Use Unicode symbols: 🔲 (collision on) or ⬜ (collision off)
+    btn.textContent = collisionMeshVisible ? "🔲" : "⬜";
+    btn.title = collisionMeshVisible ? "Collision mesh: VISIBLE (click to hide)" : "Collision mesh: HIDDEN (click to show)";
+}
+
+/**
+ * Get current collision mesh visibility state
+ */
+export function getCollisionMeshVisible() {
+    return collisionMeshVisible;
+}
+
+/**
+ * Set collision mesh visibility state (updates button icon)
+ */
+export function setCollisionMeshVisible(visible) {
+    collisionMeshVisible = visible;
+    updateCollisionMeshToggleButton();
+}
+
+/**
+ * Register a listener for collision mesh visibility changes
+ * @param {Function} callback - Called with (isVisible: boolean)
+ */
+export function onCollisionMeshToggle(callback) {
+    collisionMeshListeners.add(callback);
+    console.log("Registered collision mesh toggle listener, total listeners:", collisionMeshListeners.size);
+}
+
+/**
+ * Unregister a collision mesh visibility listener
+ */
+export function offCollisionMeshToggle(callback) {
+    collisionMeshListeners.delete(callback);
+}
+
+// ========== Physics Toggle ==========
+let physicsEnabled = false;
+let physicsToggleCallback = null;
+const physicsListeners = new Set();
+
+/**
+ * Create physics toggle button (below collision mesh toggle)
+ * @param {Function} onToggle - Callback function called when physics is toggled
+ */
+export function createPhysicsToggleButton(onToggle) {
+    physicsToggleCallback = onToggle;
+    
+    const button = document.createElement("button");
+    button.id = "physics-toggle";
+    button.style.cssText = `
+        position: fixed;
+        top: 110px;
+        left: 10px;
+        width: 40px;
+        height: 40px;
+        background: rgba(0, 0, 0, 0.7);
+        border: 2px solid rgba(255, 255, 255, 0.5);
+        border-radius: 50%;
+        color: white;
+        font-size: 18px;
+        cursor: pointer;
+        z-index: 1001;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    `;
+    button.addEventListener("click", () => {
+        physicsEnabled = !physicsEnabled;
+        console.log("Physics toggle clicked, new state:", physicsEnabled);
+        updatePhysicsToggleButton();
+        if (physicsToggleCallback) {
+            physicsToggleCallback(physicsEnabled);
+        }
+        // Notify all registered listeners
+        physicsListeners.forEach(cb => cb(physicsEnabled));
+    });
+    button.addEventListener("mouseenter", () => {
+        button.style.background = "rgba(0, 0, 0, 0.9)";
+        button.style.borderColor = "rgba(255, 255, 255, 0.8)";
+    });
+    button.addEventListener("mouseleave", () => {
+        button.style.background = "rgba(0, 0, 0, 0.7)";
+        button.style.borderColor = "rgba(255, 255, 255, 0.5)";
+    });
+    
+    updatePhysicsToggleButton(button);
+    document.body.appendChild(button);
+}
+
+/**
+ * Update the physics toggle button icon
+ */
+function updatePhysicsToggleButton(button = null) {
+    const btn = button || document.getElementById("physics-toggle");
+    if (!btn) return;
+    
+    // 🚀 = physics on (thruster mode), ⚡ = physics off (free fly)
+    btn.textContent = physicsEnabled ? "🚀" : "⚡";
+    btn.title = physicsEnabled ? "Physics: ON (click to disable)" : "Physics: OFF (click to enable)";
+}
+
+/**
+ * Get current physics enabled state
+ */
+export function getPhysicsEnabled() {
+    return physicsEnabled;
+}
+
+/**
+ * Set physics enabled state (updates button icon)
+ */
+export function setPhysicsEnabled(enabled) {
+    physicsEnabled = enabled;
+    updatePhysicsToggleButton();
+}
+
+/**
+ * Register a listener for physics toggle changes
+ * @param {Function} callback - Called with (isEnabled: boolean)
+ */
+export function onPhysicsToggle(callback) {
+    physicsListeners.add(callback);
+}
+
+/**
+ * Unregister a physics toggle listener
+ */
+export function offPhysicsToggle(callback) {
+    physicsListeners.delete(callback);
 }
 
 const worldPos = new THREE.Vector3();
