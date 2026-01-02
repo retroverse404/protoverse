@@ -118,10 +118,16 @@ export class ProtoScene {
      * @param {boolean} visible - Initial visibility (default false)
      * @returns {Promise<THREE.Group>} The loaded collision mesh
      */
-    async loadCollisionMesh(url, world = 0, visible = false) {
+    async loadCollisionMesh(url, world = 0, visible = false, bustCache = true) {
         console.log("Loading collision mesh:", url);
 
-        const absoluteURL = new URL(url, window.location.href).href;
+        let absoluteURL = new URL(url, window.location.href).href;
+        
+        // Add cache-busting query parameter to force fresh load
+        if (bustCache) {
+            const separator = absoluteURL.includes('?') ? '&' : '?';
+            absoluteURL += `${separator}_t=${Date.now()}`;
+        }
 
         return new Promise((resolve, reject) => {
             gltfLoader.load(

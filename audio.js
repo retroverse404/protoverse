@@ -4,6 +4,7 @@ import { getAudioEnabled } from "./hud.js";
 let currentAudio = null; // Currently playing audio element
 let currentWorldData = null; // Cache current world data for audio checking
 let urlResolver = null; // Function to resolve relative URLs
+let audioContext = null; // Shared AudioContext for VR compatibility
 
 /**
  * Initialize the audio module with a URL resolver function
@@ -11,6 +12,35 @@ let urlResolver = null; // Function to resolve relative URLs
  */
 export function initAudio(resolveUrlFn) {
     urlResolver = resolveUrlFn;
+}
+
+/**
+ * Ensure AudioContext is created and resumed (required for VR audio)
+ * Call this before playing any audio, especially in VR
+ * @returns {Promise<boolean>} True if AudioContext is ready
+ */
+export async function ensureAudioContext() {
+    try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) {
+            console.warn("AudioContext not supported");
+            return false;
+        }
+        
+        if (!audioContext) {
+            audioContext = new AudioContextClass();
+        }
+        
+        if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+            console.log("AudioContext resumed for VR audio");
+        }
+        
+        return audioContext.state === 'running';
+    } catch (error) {
+        console.warn("Failed to initialize AudioContext:", error);
+        return false;
+    }
 }
 
 /**
@@ -70,6 +100,9 @@ export async function playWorldAudio(worldData) {
     try {
         console.log("Playing background audio:", newAudioUrl);
         
+        // Ensure AudioContext is ready (required for VR audio on Quest)
+        await ensureAudioContext();
+        
         // Create and play audio
         currentAudio = new Audio(newAudioUrl);
         currentAudio.loop = true; // Loop the background audio
@@ -90,19 +123,33 @@ export async function playWorldAudio(worldData) {
  * Handle audio toggle callback from HUD
  * @param {boolean} enabled - Whether audio is now enabled
  */
-export function handleAudioToggle(enabled) {
+export async function handleAudioToggle(enabled) {
     console.log("handleAudioToggle:", enabled);
-    console.log("currentWorldData:", currentWorldData);
+    console.log("  currentWorldData:", currentWorldData);
+    console.log("  bgAudioUrl:", currentWorldData?.bgAudioUrl);
+    
     if (enabled) {
-        // If audio was just enabled and we have world data, play it
-        if (currentWorldData) {
-            playWorldAudio(currentWorldData);
+        try {
+            // Ensure AudioContext is ready (required for VR)
+            const contextReady = await ensureAudioContext();
+            console.log("  AudioContext ready:", contextReady);
+            
+            // If audio was just enabled and we have world data, play it
+            if (currentWorldData) {
+                await playWorldAudio(currentWorldData);
+                console.log("  Audio started successfully");
+            } else {
+                console.warn("  No world data available for audio");
+            }
+        } catch (error) {
+            console.error("  Error starting audio:", error);
         }
     } else {
         // If audio was just disabled, stop current audio
         if (currentAudio) {
             currentAudio.pause();
             currentAudio.currentTime = 0;
+            console.log("  Audio stopped");
         }
     }
 }

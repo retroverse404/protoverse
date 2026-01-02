@@ -43,7 +43,7 @@ hud.style.cssText = `
 document.body.appendChild(hud);
 
 // ========== Audio Toggle Button ==========
-let audioEnabled = true; // Default to audio on
+let audioEnabled = false; // Default to audio off (user must click to enable - required for VR)
 let audioToggleCallback = null; // Callback function when audio is toggled
 
 // ========== Collision Mesh Toggle ==========

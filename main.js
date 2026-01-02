@@ -1,5 +1,5 @@
-import { updateHUD, createAudioToggleButton, createCollisionMeshToggleButton, createPhysicsToggleButton, initHud } from "./hud.js";
-import { initAudio, playWorldAudio, handleAudioToggle, setCurrentWorldData } from "./audio.js";
+import { updateHUD, createAudioToggleButton, createCollisionMeshToggleButton, createPhysicsToggleButton, initHud, getAudioEnabled } from "./hud.js";
+import { initAudio, playWorldAudio, handleAudioToggle, setCurrentWorldData, ensureAudioContext, getCurrentWorldData } from "./audio.js";
 import { initControls, createAnimationLoop } from "./controls.js";
 import { ProtoVerse } from "./proto.js";
 import { ProtoScene, loadWorldJSON } from "./scene.js";
@@ -13,7 +13,8 @@ import {
     setPhysicsEnabled,
     isPhysicsEnabled,
     addCollisionMesh,
-    setDebugSphereVisible
+    setDebugSphereVisible,
+    createOrientationGizmo
 } from "./physics.js";
 
 
@@ -66,6 +67,10 @@ const initialWorldData = await loadWorldJSON(resolveUrl(rootworld));
 console.log("main.js: initialWorldData loaded:");
 console.log("  keys:", Object.keys(initialWorldData));
 console.log("  collisionUrl:", initialWorldData.collisionUrl);
+console.log("  bgAudioUrl:", initialWorldData.bgAudioUrl);
+
+// Set initial world data for audio (so clicking audio toggle will play it)
+setCurrentWorldData(initialWorldData);
 
 // Set initial camera position from world data
 localFrame.position.fromArray(initialWorldData.position);
@@ -76,12 +81,25 @@ const { controls, sparkXr } = initControls(renderer, camera, localFrame, {
     enableVr: true,
     animatePortal: true,
     xrFramebufferScale: 0.5,
+    onEnterXr: async () => {
+        // Resume AudioContext when entering VR (this is a valid user gesture)
+        await ensureAudioContext();
+        // If audio is enabled, try to start/resume the current world's audio
+        if (getAudioEnabled()) {
+            const worldData = getCurrentWorldData();
+            if (worldData) {
+                playWorldAudio(worldData);
+            }
+        }
+        console.log("VR audio context ready");
+    },
 });
 
 // ========== Physics Setup (before loading worlds so collision meshes get registered) ==========
 await initPhysics();
-createPlayerBody(localFrame, camera, protoScene.getScene());
+createPlayerBody(localFrame, camera, protoScene.getScene(), renderer);
 setupThrusterInput();
+createOrientationGizmo();  // Create orientation indicator for physics mode
 
 // Initialize ProtoVerse with root world (this will trigger onWorldChange callback)
 // NOTE: This must happen AFTER physics is initialized so collision meshes get registered

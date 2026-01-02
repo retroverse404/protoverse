@@ -13,6 +13,7 @@ export const physicsConfig = {
     player: {
         // Collision shape
         radius: 0.2,              // Sphere radius in meters
+        collisionYOffset: -0.25,    // Vertical offset from localFrame (1.0 = chest level in VR)
         
         // Mass and inertia
         mass: 10.0,                // Player mass in kg
@@ -20,7 +21,7 @@ export const physicsConfig = {
         // Viscosity / Drag (scuba diving feel)
         // Higher values = more resistance = momentum slows faster
         // 0 = no drag (drifts forever), 0.1 = minimal, 2.0 = heavy drag
-        linearDamping: 0.4,       // Water-like viscosity 
+        linearDamping: 0.3,       // Gentle taper for graceful slowdown 
         angularDamping: 3.0,      // Rotational resistance (stabilizes tumbling)
         
         // Bounce behavior
@@ -35,7 +36,7 @@ export const physicsConfig = {
     // ========== Thruster Settings ==========
     thruster: {
         // Force magnitude (higher to overcome viscosity drag)
-        force: 0.6,              // Thrust force in Newtons
+        force: 0.3,              // Thrust force in Newtons
         
         // Boost multiplier (when shift is held)
         boostMultiplier: 2.5,

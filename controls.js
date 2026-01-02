@@ -1,4 +1,10 @@
 import { SparkControls, SparkXr } from "@sparkjsdev/spark";
+import * as THREE from "three";
+
+// Reusable quaternions for rotation calculations
+const _tempQuat = new THREE.Quaternion();
+const _rotationQuat = new THREE.Quaternion();
+const _euler = new THREE.Euler();
 
 /**
  * Configuration options for controls
@@ -10,8 +16,15 @@ export class ControlsConfig {
         this.xrFramebufferScale = options.xrFramebufferScale ?? 0.5;
         this.onEnterXr = options.onEnterXr ?? null;
         this.onExitXr = options.onExitXr ?? null;
+        // VR rotation mode:
+        // false = yaw only (turn left/right on XZ plane) - simpler, recommended
+        // true = full 3DOF (yaw/pitch/roll with thumbstick + trigger/grip)
+        this.vrFullRotation = options.vrFullRotation ?? false;
     }
 }
+
+// Store config reference for applyVRRotation
+let activeControlsConfig = null;
 
 /**
  * Initialize controls and VR support
@@ -52,17 +65,109 @@ export function initControls(renderer, camera, localFrame, config = {}) {
                 }
             },
             enableHands: true,
-            controllers: {},
+            controllers: {
+                // Disable SparkXr's built-in rotation - we'll handle it ourselves in local space
+                getRotate: (gamepads, sparkXr) => {
+                    // Return zero - we handle rotation manually in the animation loop
+                    return new THREE.Vector3(0, 0, 0);
+                },
+            },
         });
         renderer.xr.setFramebufferScaleFactor(controlsConfig.xrFramebufferScale);
         window.sparkXr = sparkXr;
     }
 
+    // Store config for applyVRRotation
+    activeControlsConfig = controlsConfig;
+    
     return {
         controls,
         sparkXr,
         config: controlsConfig
     };
+}
+
+/**
+ * Apply VR controller rotation to localFrame
+ * Two modes controlled by vrFullRotation config:
+ * - false (default): yaw only (turn left/right on XZ plane)
+ * - true: full 3DOF (yaw/pitch/roll)
+ * @param {THREE.Group} localFrame - The local frame to rotate
+ * @param {THREE.WebGLRenderer} renderer - Renderer for XR session access
+ * @param {number} deltaTime - Time since last frame in seconds
+ */
+export function applyVRRotation(localFrame, renderer, deltaTime) {
+    if (!renderer.xr.isPresenting) return;
+    
+    const session = renderer.xr.getSession();
+    if (!session) return;
+    
+    const fullRotation = activeControlsConfig?.vrFullRotation ?? false;
+    let yaw = 0, pitch = 0, roll = 0;
+    const rotationSpeed = 1.5; // radians per second at full deflection
+    
+    for (const source of session.inputSources) {
+        const gamepad = source.gamepad;
+        if (!gamepad) continue;
+        
+        if (source.handedness === "right") {
+            // Thumbstick left/right for yaw
+            const rawYaw = gamepad.axes[2] || 0;
+            if (Math.abs(rawYaw) > 0.1) yaw = rawYaw;
+            
+            // Full rotation mode: also read pitch and roll
+            if (fullRotation) {
+                // Thumbstick up/down for pitch
+                const rawPitch = gamepad.axes[3] || 0;
+                if (Math.abs(rawPitch) > 0.1) pitch = rawPitch;
+                
+                // Trigger/grip for roll
+                const triggerValue = gamepad.buttons[0]?.value || 0;
+                const gripValue = gamepad.buttons[1]?.value || 0;
+                const rawRoll = (triggerValue - gripValue);
+                if (Math.abs(rawRoll) > 0.1) roll = rawRoll;
+            }
+        }
+    }
+    
+    // If no input, skip
+    if (yaw === 0 && pitch === 0 && roll === 0) return;
+    
+    // Calculate rotation amounts for this frame
+    const yawAmount = -yaw * rotationSpeed * deltaTime;    // Negate for natural feel
+    const pitchAmount = -pitch * rotationSpeed * deltaTime; // Negate: push up to look up
+    const rollAmount = -roll * rotationSpeed * deltaTime;   // Negate: trigger = roll right
+    
+    if (fullRotation) {
+        // Full 3DOF: apply rotations in LOCAL space using quaternions
+        
+        // Yaw (rotate around LOCAL Y axis)
+        if (yawAmount !== 0) {
+            _rotationQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAmount);
+            localFrame.quaternion.multiply(_rotationQuat);
+        }
+        
+        // Pitch (rotate around LOCAL X axis)
+        if (pitchAmount !== 0) {
+            _rotationQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitchAmount);
+            localFrame.quaternion.multiply(_rotationQuat);
+        }
+        
+        // Roll (rotate around LOCAL Z axis)
+        if (rollAmount !== 0) {
+            _rotationQuat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), rollAmount);
+            localFrame.quaternion.multiply(_rotationQuat);
+        }
+    } else {
+        // Yaw only: apply around WORLD Y axis (turning on XZ plane)
+        if (yawAmount !== 0) {
+            _rotationQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAmount);
+            localFrame.quaternion.premultiply(_rotationQuat);  // premultiply for world-space
+        }
+    }
+    
+    // Normalize to prevent drift
+    localFrame.quaternion.normalize();
 }
 
 /**
@@ -109,6 +214,9 @@ export function createAnimationLoop({
         if (sparkXr?.updateControllers) {
             sparkXr.updateControllers(camera);
         }
+        
+        // Apply VR rotation in local space (right controller)
+        applyVRRotation(localFrame, renderer, deltaTime);
 
         // Update movement controls (may be disabled when physics is on)
         controls.update(localFrame);

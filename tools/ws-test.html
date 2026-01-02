@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WS Test</title>
+    <style>
+        body {
+            font-family: 'SF Mono', monospace;
+            background: #1a1a2e;
+            color: #eee;
+            padding: 40px;
+        }
+        h1 { color: #00d4ff; }
+        .panel {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            max-width: 600px;
+        }
+        button {
+            background: #00d4ff;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 10px;
+            font-weight: bold;
+        }
+        button:hover { opacity: 0.9; }
+        #log {
+            background: #0a0a15;
+            padding: 16px;
+            border-radius: 6px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        .log-entry { margin-bottom: 4px; }
+        .log-entry.peers { color: #a855f7; }
+        .log-entry.join { color: #22c55e; }
+        .log-entry.leave { color: #ef4444; }
+        .log-entry.state { color: #00d4ff; }
+        .log-entry.info { color: #888; }
+    </style>
+</head>
+<body>
+    <h1>🔷 WebSocket Test</h1>
+    
+    <div class="panel">
+        <button id="joinBtn">Join World</button>
+        <button id="stateBtn">Send State</button>
+        <button id="clearBtn">Clear Log</button>
+    </div>
+    
+    <div class="panel">
+        <div id="log"></div>
+    </div>
+
+    <script type="module">
+        import { createProtoverseWs } from './ws-client.js';
+
+        const logDiv = document.getElementById('log');
+        function log(msg, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        const clientName = 'tab-' + Math.floor(Math.random() * 10000);
+        const clientColor = [0x00d4ff, 0x22c55e, 0xf59e0b, 0xef4444, 0xa855f7][Math.floor(Math.random() * 5)];
+        
+        log(`Connecting as ${clientName}...`, 'info');
+
+        const ws = createProtoverseWs('ws://localhost:8080');
+        
+        ws.onOpen = () => log('Connected!', 'info');
+        ws.onClose = () => log('Disconnected', 'info');
+        ws.onError = (err) => log(`Error: ${err}`, 'info');
+        
+        ws.onPeers = (peers) => {
+            log(`Peers in room: ${JSON.stringify(peers)}`, 'peers');
+        };
+        
+        ws.onJoin = (msg) => {
+            log(`Join: ${msg.name} (${msg.id}) color=${msg.color}`, 'join');
+        };
+        
+        ws.onLeave = (msg) => {
+            log(`Leave: ${msg.id}`, 'leave');
+        };
+        
+        ws.onState = (msg) => {
+            log(`State from ${msg.name}: pos=${JSON.stringify(msg.pos)}`, 'state');
+        };
+
+        document.getElementById('joinBtn').onclick = () => {
+            ws.join('/root/world.json', clientName, clientColor);
+            log(`Joining /root/world.json as ${clientName}`, 'info');
+        };
+
+        document.getElementById('stateBtn').onclick = () => {
+            const pos = [Math.random() * 10, 0, Math.random() * 10];
+            const rot = [0, 0, 0, 1];
+            ws.sendState(pos, rot, { demo: true });
+            log(`Sent state: pos=${JSON.stringify(pos)}`, 'info');
+        };
+
+        document.getElementById('clearBtn').onclick = () => {
+            logDiv.innerHTML = '';
+        };
+    </script>
+</body>
+</html>
+

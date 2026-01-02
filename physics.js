@@ -7,6 +7,7 @@
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 import { physicsConfig } from "./physics-config.js";
+import { ensureAudioContext } from "./audio.js";
 
 // Module state
 let world = null;
@@ -24,10 +25,16 @@ let sceneRef = null;
 let debugSphere = null;
 let debugSphereVisible = false;
 
+// Orientation gizmo (shows player orientation when physics is enabled - desktop only)
+let orientationScene = null;
+let orientationCamera = null;
+let orientationGizmo = null;
+let orientationRenderer = null;
+
 // Collision bodies for world geometry
 const collisionBodies = [];
 
-// Input state for thruster
+// Input state for thruster (keyboard)
 const thrusterInput = {
     forward: false,   // W or ArrowUp
     backward: false,  // S or ArrowDown
@@ -37,6 +44,15 @@ const thrusterInput = {
     down: false,      // F or Ctrl
     boost: false,     // Shift
 };
+
+// VR controller input state
+const vrThrusterInput = {
+    x: 0,  // Left/right from left thumbstick
+    y: 0,  // Up/down from triggers
+    z: 0,  // Forward/back from left thumbstick
+    boost: false,  // From right trigger
+};
+let rendererRef = null;  // For XR gamepad access
 
 // Thrust sound
 let thrustAudio = null;
@@ -63,7 +79,7 @@ function initThrustSound() {
 /**
  * Start playing thrust sound
  */
-function startThrustSound() {
+async function startThrustSound() {
     if (!thrustAudio || !isEnabled) return;
     
     // Cancel any pending stop or fade
@@ -81,6 +97,9 @@ function startThrustSound() {
     
     // If already playing, just continue
     if (isThrustSoundPlaying) return;
+    
+    // Ensure AudioContext is ready (required for VR audio on Quest)
+    await ensureAudioContext();
     
     thrustAudio.currentTime = 0;
     thrustAudio.play().catch(err => {
@@ -208,8 +227,9 @@ export async function initPhysics() {
  * @param {THREE.Group} localFrame - The player's local frame (camera parent)
  * @param {THREE.Camera} camera - The camera for direction reference
  * @param {THREE.Scene} scene - The scene to add debug visualization to
+ * @param {THREE.WebGLRenderer} renderer - The renderer (for VR controller access)
  */
-export function createPlayerBody(localFrame, camera, scene) {
+export function createPlayerBody(localFrame, camera, scene, renderer = null) {
     if (!isInitialized || !world) {
         console.error("Physics not initialized, cannot create player body");
         return;
@@ -218,16 +238,19 @@ export function createPlayerBody(localFrame, camera, scene) {
     localFrameRef = localFrame;
     cameraRef = camera;
     sceneRef = scene;
+    rendererRef = renderer;
     
     const config = physicsConfig.player;
     const pos = localFrame.position;
+    const yOffset = config.collisionYOffset || 0;
     
-    // Create dynamic rigid body
+    // Create dynamic rigid body (offset vertically for VR chest-level collision)
     const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(pos.x, pos.y, pos.z)
+        .setTranslation(pos.x, pos.y + yOffset, pos.z)
         .setLinearDamping(config.linearDamping)
         .setAngularDamping(config.angularDamping)
-        .setCcdEnabled(true); // Continuous collision detection for fast movement
+        .setCcdEnabled(true) // Continuous collision detection for fast movement
+        .setCanSleep(false); // Prevent abrupt stop from sleep threshold
     
     playerBody = world.createRigidBody(bodyDesc);
     
@@ -262,6 +285,136 @@ export function setDebugSphereVisible(visible) {
     debugSphereVisible = visible;
     if (debugSphere) {
         debugSphere.visible = visible;
+    }
+}
+
+/**
+ * Create the orientation gizmo overlay
+ * Shows player orientation in the bottom-left corner when physics is enabled
+ */
+export function createOrientationGizmo() {
+    // Create a small renderer for the gizmo overlay
+    orientationRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    orientationRenderer.setSize(150, 150);
+    orientationRenderer.setClearColor(0x000000, 0);
+    
+    // Style and position the canvas
+    const canvas = orientationRenderer.domElement;
+    canvas.id = 'orientation-gizmo';
+    canvas.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        width: 150px;
+        height: 150px;
+        pointer-events: none;
+        z-index: 1000;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.3);
+        display: none;
+    `;
+    document.body.appendChild(canvas);
+    
+    // Create scene and camera for gizmo
+    orientationScene = new THREE.Scene();
+    orientationCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 10);
+    orientationCamera.position.set(0, 0, 3);
+    orientationCamera.lookAt(0, 0, 0);
+    
+    // Create the gizmo group
+    orientationGizmo = new THREE.Group();
+    
+    // Create arrow helpers for each axis
+    const arrowLength = 0.8;
+    const arrowHeadLength = 0.2;
+    const arrowHeadWidth = 0.1;
+    
+    // Forward (Z-) = Blue arrow pointing "forward"
+    const forwardArrow = new THREE.ArrowHelper(
+        new THREE.Vector3(0, 0, -1),
+        new THREE.Vector3(0, 0, 0),
+        arrowLength, 0x0088ff, arrowHeadLength, arrowHeadWidth
+    );
+    orientationGizmo.add(forwardArrow);
+    
+    // Right (X+) = Red arrow
+    const rightArrow = new THREE.ArrowHelper(
+        new THREE.Vector3(1, 0, 0),
+        new THREE.Vector3(0, 0, 0),
+        arrowLength * 0.7, 0xff4444, arrowHeadLength * 0.8, arrowHeadWidth * 0.8
+    );
+    orientationGizmo.add(rightArrow);
+    
+    // Up (Y+) = Green arrow
+    const upArrow = new THREE.ArrowHelper(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(0, 0, 0),
+        arrowLength * 0.7, 0x44ff44, arrowHeadLength * 0.8, arrowHeadWidth * 0.8
+    );
+    orientationGizmo.add(upArrow);
+    
+    // Add a small sphere at origin for reference
+    const originSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.1, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    orientationGizmo.add(originSphere);
+    
+    // Add label texts (using sprites)
+    const labels = [
+        { text: 'F', pos: [0, 0, -1.1], color: '#0088ff' },  // Forward
+        { text: 'R', pos: [1.0, 0, 0], color: '#ff4444' },   // Right
+        { text: 'U', pos: [0, 1.0, 0], color: '#44ff44' },   // Up
+    ];
+    
+    labels.forEach(({ text, pos, color }) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = color;
+        ctx.font = 'bold 48px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, 32, 32);
+        
+        const texture = new THREE.CanvasTexture(canvas);
+        const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+        const sprite = new THREE.Sprite(spriteMaterial);
+        sprite.position.set(...pos);
+        sprite.scale.set(0.3, 0.3, 0.3);
+        orientationGizmo.add(sprite);
+    });
+    
+    orientationScene.add(orientationGizmo);
+    
+    // Add ambient light
+    orientationScene.add(new THREE.AmbientLight(0xffffff, 1));
+    
+    console.log("✓ Orientation gizmo created");
+}
+
+/**
+ * Update the orientation gizmo to match player orientation (desktop only)
+ */
+function updateOrientationGizmo() {
+    if (!localFrameRef) return;
+    
+    // Update 2D overlay gizmo (for desktop)
+    if (orientationGizmo && orientationRenderer) {
+        const canvas = orientationRenderer.domElement;
+        
+        if (isEnabled) {
+            canvas.style.display = 'block';
+            
+            // Show localFrame orientation (where thrust goes), not camera orientation
+            orientationGizmo.quaternion.copy(localFrameRef.quaternion).invert();
+            
+            orientationRenderer.render(orientationScene, orientationCamera);
+        } else {
+            canvas.style.display = 'none';
+        }
     }
 }
 
@@ -380,9 +533,10 @@ export function setPhysicsEnabled(enabled) {
     isEnabled = enabled;
     
     if (enabled && playerBody && localFrameRef) {
-        // Sync player body position with current localFrame position
+        // Sync player body position with current localFrame position (with Y offset)
         const pos = localFrameRef.position;
-        playerBody.setTranslation(new RAPIER.Vector3(pos.x, pos.y, pos.z), true);
+        const yOffset = physicsConfig.player.collisionYOffset || 0;
+        playerBody.setTranslation(new RAPIER.Vector3(pos.x, pos.y + yOffset, pos.z), true);
         playerBody.setLinvel(new RAPIER.Vector3(0, 0, 0), true);
         playerBody.setAngvel(new RAPIER.Vector3(0, 0, 0), true);
         console.log("Physics enabled, player synced to position:", pos.toArray());
@@ -410,7 +564,8 @@ export function syncPlayerToLocalFrame() {
     if (!playerBody || !localFrameRef) return;
     
     const pos = localFrameRef.position;
-    playerBody.setTranslation(new RAPIER.Vector3(pos.x, pos.y, pos.z), true);
+    const yOffset = physicsConfig.player.collisionYOffset || 0;
+    playerBody.setTranslation(new RAPIER.Vector3(pos.x, pos.y + yOffset, pos.z), true);
     // Reset velocity so player doesn't keep momentum through portal
     playerBody.setLinvel(new RAPIER.Vector3(0, 0, 0), true);
     playerBody.setAngvel(new RAPIER.Vector3(0, 0, 0), true);
@@ -496,40 +651,109 @@ function updateThrusterKey(code, pressed) {
 }
 
 /**
- * Apply thruster forces based on current input
+ * Update VR controller input for thrusters
+ * Called each frame when in VR mode
+ */
+function updateVrThrusterInput() {
+    if (!rendererRef || !rendererRef.xr.isPresenting) {
+        vrThrusterInput.x = 0;
+        vrThrusterInput.y = 0;
+        vrThrusterInput.z = 0;
+        vrThrusterInput.boost = false;
+        return false;
+    }
+    
+    const session = rendererRef.xr.getSession();
+    if (!session) return false;
+    
+    let hasInput = false;
+    
+    for (const source of session.inputSources) {
+        const gamepad = source.gamepad;
+        if (!gamepad) continue;
+        
+        if (source.handedness === "left") {
+            // Left thumbstick for movement (axes 2 and 3)
+            vrThrusterInput.x = gamepad.axes[2] || 0;  // Left/right
+            vrThrusterInput.z = gamepad.axes[3] || 0;  // Forward/back
+            // Left trigger (button 0) for up, left grip (button 1) for down
+            vrThrusterInput.y = (gamepad.buttons[0]?.value || 0) - (gamepad.buttons[1]?.value || 0);
+            
+            if (Math.abs(vrThrusterInput.x) > 0.1 || 
+                Math.abs(vrThrusterInput.y) > 0.1 || 
+                Math.abs(vrThrusterInput.z) > 0.1) {
+                hasInput = true;
+            }
+        } else if (source.handedness === "right") {
+            // Right trigger for boost
+            vrThrusterInput.boost = gamepad.buttons[0]?.pressed || false;
+        }
+    }
+    
+    return hasInput;
+}
+
+/**
+ * Apply thruster forces based on current input (keyboard + VR)
  */
 function applyThrusterForces() {
     if (!playerBody || !cameraRef) return;
+    
+    // Update VR controller input
+    const hasVrInput = updateVrThrusterInput();
     
     const config = physicsConfig.thruster;
     let force = config.force;
     
     // Apply boost multiplier
-    if (thrusterInput.boost) {
+    if (thrusterInput.boost || vrThrusterInput.boost) {
         force *= config.boostMultiplier;
     }
     
-    // Calculate thrust direction based on camera's world orientation
+    // Calculate thrust direction based on localFrame orientation (body, not head)
+    // This decouples thrust from where you're looking in VR
     const thrustDir = new THREE.Vector3();
     
-    // Get camera's world direction (the direction it's looking)
-    const forward = new THREE.Vector3();
-    cameraRef.getWorldDirection(forward);
+    // Get localFrame's world forward direction (negative Z in local space)
+    const forward = new THREE.Vector3(0, 0, -1);
+    forward.applyQuaternion(localFrameRef.quaternion);
     
-    // Get camera's world right vector
-    const right = new THREE.Vector3();
-    right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+    // Get localFrame's world right vector (positive X in local space)
+    const right = new THREE.Vector3(1, 0, 0);
+    right.applyQuaternion(localFrameRef.quaternion);
     
-    // World up for vertical movement
+    // World up for vertical movement (always world Y)
     const up = new THREE.Vector3(0, 1, 0);
     
-    // Accumulate thrust direction
+    // Accumulate thrust direction from keyboard
     if (thrusterInput.forward) thrustDir.add(forward);
     if (thrusterInput.backward) thrustDir.sub(forward);
     if (thrusterInput.right) thrustDir.add(right);
     if (thrusterInput.left) thrustDir.sub(right);
     if (thrusterInput.up) thrustDir.add(up);
     if (thrusterInput.down) thrustDir.sub(up);
+    
+    // Add VR controller input (analog, so we scale by the axis values)
+    // Deadzone of 0.1 to prevent drift
+    if (Math.abs(vrThrusterInput.z) > 0.1) {
+        // Z axis: negative is forward, positive is backward
+        thrustDir.addScaledVector(forward, -vrThrusterInput.z);
+    }
+    if (Math.abs(vrThrusterInput.x) > 0.1) {
+        // X axis: positive is right, negative is left
+        thrustDir.addScaledVector(right, vrThrusterInput.x);
+    }
+    if (Math.abs(vrThrusterInput.y) > 0.1) {
+        // Y: trigger for up, grip for down
+        thrustDir.addScaledVector(up, vrThrusterInput.y);
+    }
+    
+    // Handle thrust sound for VR input
+    if (hasVrInput && !isThrustSoundPlaying) {
+        startThrustSound();
+    } else if (!hasVrInput && !isAnyThrusterActive() && isThrustSoundPlaying) {
+        stopThrustSound();
+    }
     
     // Normalize and apply force
     if (thrustDir.lengthSq() > 0) {
@@ -570,6 +794,9 @@ function clampVelocity() {
  * @param {number} deltaTime - Time since last frame in seconds
  */
 export function updatePhysics(deltaTime) {
+    // Always update orientation gizmo (it handles its own visibility)
+    updateOrientationGizmo();
+    
     if (!isInitialized || !world || !isEnabled) return;
     
     // Apply thruster forces
@@ -581,10 +808,11 @@ export function updatePhysics(deltaTime) {
     // Clamp velocity
     clampVelocity();
     
-    // Sync localFrame position with physics body
+    // Sync localFrame position with physics body (subtract Y offset)
     if (playerBody && localFrameRef) {
         const pos = playerBody.translation();
-        localFrameRef.position.set(pos.x, pos.y, pos.z);
+        const yOffset = physicsConfig.player.collisionYOffset || 0;
+        localFrameRef.position.set(pos.x, pos.y - yOffset, pos.z);
         
         // Update debug sphere position
         if (debugSphere) {

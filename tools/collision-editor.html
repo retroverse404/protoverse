@@ -27,17 +27,36 @@
       position: fixed;
       top: 10px;
       left: 10px;
+      bottom: 60px;
       display: flex;
       flex-direction: column;
       gap: 8px;
       z-index: 100;
       max-width: 280px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 5px;
+    }
+    #toolbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    #toolbar::-webkit-scrollbar-track {
+      background: rgba(30, 30, 50, 0.5);
+      border-radius: 3px;
+    }
+    #toolbar::-webkit-scrollbar-thumb {
+      background: #4a4a6a;
+      border-radius: 3px;
+    }
+    #toolbar::-webkit-scrollbar-thumb:hover {
+      background: #6a6a9a;
     }
     .toolbar-group {
       background: rgba(30, 30, 50, 0.95);
       border-radius: 8px;
       padding: 12px;
       border: 1px solid #3a3a5a;
+      flex-shrink: 0;
     }
     .toolbar-group h3 {
       font-size: 11px;
@@ -45,6 +64,25 @@
       color: #888;
       margin-bottom: 8px;
       letter-spacing: 1px;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .toolbar-group h3::after {
+      content: '▼';
+      font-size: 8px;
+      transition: transform 0.2s;
+    }
+    .toolbar-group.collapsed h3::after {
+      transform: rotate(-90deg);
+    }
+    .toolbar-group.collapsed .group-content {
+      display: none;
+    }
+    .group-content {
+      /* Content wrapper for collapse */
     }
     .btn {
       background: #2a2a4a;
@@ -140,88 +178,141 @@
   
   <div id="toolbar">
     <div class="toolbar-group">
-      <h3>1. Load Splat</h3>
-      <button class="btn" onclick="document.getElementById('file-input').click()">Load .spz file</button>
-      <input type="file" id="file-input" accept=".spz,.ply,.splat" style="display:none">
-      <div id="splat-stats" style="margin-top: 8px;">
-        <div class="stats-row"><span class="label">Splats:</span> <span class="value" id="stat-splats">-</span></div>
+      <h3 onclick="toggleSection(this)">1. Load File</h3>
+      <div class="group-content">
+        <button class="btn" onclick="document.getElementById('file-input').click()">Load .spz / .glb file</button>
+        <input type="file" id="file-input" accept=".spz,.ply,.splat,.glb,.gltf" style="display:none">
+        <div id="splat-stats" style="margin-top: 8px;">
+          <div class="stats-row"><span class="label">Splats:</span> <span class="value" id="stat-splats">-</span></div>
+        </div>
       </div>
     </div>
     
     <div class="toolbar-group">
-      <h3>2. Downsample</h3>
-      <div class="prop-row">
-        <label>Opacity Cutoff <span class="value" id="opacity-threshold-value">0.05</span></label>
-        <input type="range" id="opacity-threshold" min="0" max="1" step="0.01" value="0.05" oninput="updateOpacityThreshold()">
+      <h3 onclick="toggleSection(this)">2. Downsample</h3>
+      <div class="group-content">
+        <div class="prop-row">
+          <label>Opacity Cutoff <span class="value" id="opacity-threshold-value">0.05</span></label>
+          <input type="range" id="opacity-threshold" min="0" max="1" step="0.01" value="0.05" oninput="updateOpacityThreshold()">
+        </div>
+        <div class="prop-row">
+          <label>Sample Rate <span class="value" id="sample-rate-value">10%</span></label>
+          <input type="range" id="sample-rate" min="1" max="100" value="10" oninput="updateSampleRate()">
+        </div>
+        <div class="stats-row"><span class="label">After opacity:</span> <span class="value" id="stat-filtered">-</span></div>
+        <div class="stats-row"><span class="label">Points used:</span> <span class="value" id="stat-points">-</span></div>
       </div>
-      <div class="prop-row">
-        <label>Sample Rate <span class="value" id="sample-rate-value">10%</span></label>
-        <input type="range" id="sample-rate" min="1" max="100" value="10" oninput="updateSampleRate()">
-      </div>
-      <div class="stats-row"><span class="label">After opacity:</span> <span class="value" id="stat-filtered">-</span></div>
-      <div class="stats-row"><span class="label">Points used:</span> <span class="value" id="stat-points">-</span></div>
     </div>
 
-    <div class="toolbar-group">
-      <h3>2b. Controls</h3>
-      <div class="prop-row">
-        <label>Move Speed <span class="value" id="move-speed-value">1.0</span></label>
-        <input type="range" id="move-speed" min="0.1" max="5" step="0.1" value="1" oninput="updateMoveSpeed()">
+    <div class="toolbar-group collapsed">
+      <h3 onclick="toggleSection(this)">2b. Controls</h3>
+      <div class="group-content">
+        <div class="prop-row">
+          <label>Move Speed <span class="value" id="move-speed-value">5.0</span></label>
+          <input type="range" id="move-speed" min="0.1" max="5" step="0.1" value="5" oninput="updateMoveSpeed()">
+        </div>
       </div>
     </div>
     
     <div class="toolbar-group">
-      <h3>3. Generate Mesh</h3>
-      <div class="prop-row">
-        <label>Voxel Resolution <span class="value" id="voxel-res-value">50</span></label>
-        <input type="range" id="voxel-resolution" min="20" max="500" value="50" oninput="updateVoxelRes()">
-      </div>
-      <div class="prop-row">
-        <label>Fill Radius <span class="value" id="fill-radius-value">2.0</span></label>
-        <input type="range" id="fill-radius" min="0.1" max="5" value="2" step="0.1" oninput="updateFillRadius()">
-      </div>
-      <button class="btn primary" id="generate-btn" onclick="generateMesh()" disabled>Generate Mesh</button>
-      <div class="progress-bar"><div class="fill" id="progress"></div></div>
-      <div class="stats-row" style="margin-top: 8px;"><span class="label">Vertices:</span> <span class="value" id="stat-verts">-</span></div>
-      <div class="stats-row"><span class="label">Triangles:</span> <span class="value" id="stat-tris">-</span></div>
-    </div>
-    
-    <div class="toolbar-group">
-      <h3>4. Preview</h3>
-      <div class="toggle-row">
-        <input type="checkbox" id="show-points" checked onchange="togglePoints()">
-        <label for="show-points">Show sample points</label>
-      </div>
-      <div class="toggle-row">
-        <input type="checkbox" id="show-mesh" checked onchange="toggleMesh()">
-        <label for="show-mesh">Show mesh</label>
-      </div>
-      <div class="toggle-row">
-        <input type="checkbox" id="show-wireframe" onchange="toggleWireframe()">
-        <label for="show-wireframe">Wireframe mode</label>
+      <h3 onclick="toggleSection(this)">3. Generate Mesh</h3>
+      <div class="group-content">
+        <div class="prop-row">
+          <label>Voxel Resolution <span class="value" id="voxel-res-value">50</span></label>
+          <input type="range" id="voxel-resolution" min="20" max="500" value="50" oninput="updateVoxelRes()">
+        </div>
+        <div class="prop-row">
+          <label>Fill Radius <span class="value" id="fill-radius-value">2.0</span></label>
+          <input type="range" id="fill-radius" min="0.1" max="5" value="2" step="0.1" oninput="updateFillRadius()">
+        </div>
+        <button class="btn primary" id="generate-btn" onclick="generateMesh()" disabled>Generate Mesh</button>
+        <div class="progress-bar"><div class="fill" id="progress"></div></div>
+        <div class="stats-row" style="margin-top: 8px;"><span class="label">Vertices:</span> <span class="value" id="stat-verts">-</span></div>
+        <div class="stats-row"><span class="label">Triangles:</span> <span class="value" id="stat-tris">-</span></div>
       </div>
     </div>
     
     <div class="toolbar-group">
-      <h3>5. Erase Tool</h3>
-      <div class="toggle-row">
-        <input type="checkbox" id="erase-mode" onchange="toggleEraseMode()">
-        <label for="erase-mode">Enable Erase Mode</label>
-      </div>
-      <div class="prop-row">
-        <label>Eraser Size <span class="value" id="eraser-size-value">0.5</span></label>
-        <input type="range" id="eraser-size" min="0.1" max="3" step="0.1" value="0.5" oninput="updateEraserSize()">
+      <h3 onclick="toggleSection(this)">4. Preview</h3>
+      <div class="group-content">
+        <div class="toggle-row">
+          <input type="checkbox" id="show-points" checked onchange="togglePoints()">
+          <label for="show-points">Show sample points</label>
+        </div>
+        <div class="toggle-row">
+          <input type="checkbox" id="show-mesh" checked onchange="toggleMesh()">
+          <label for="show-mesh">Show mesh</label>
+        </div>
+        <div class="toggle-row">
+          <input type="checkbox" id="show-wireframe" onchange="toggleWireframe()">
+          <label for="show-wireframe">Wireframe mode</label>
+        </div>
+        <div class="toggle-row">
+          <input type="checkbox" id="show-edges" onchange="toggleEdges()">
+          <label for="show-edges">Show edges overlay</label>
+        </div>
+        <div class="toggle-row">
+          <input type="checkbox" id="show-vertices" onchange="toggleVertices()">
+          <label for="show-vertices">Show vertices</label>
+        </div>
       </div>
     </div>
     
     <div class="toolbar-group">
-      <h3>6. Export</h3>
-      <button class="btn primary" id="export-btn" onclick="exportGLB()" disabled>Export .glb</button>
+      <h3 onclick="toggleSection(this)">5. Erase Tool</h3>
+      <div class="group-content">
+        <div class="toggle-row">
+          <input type="checkbox" id="erase-mode" onchange="toggleEraseMode()">
+          <label for="erase-mode">Enable Erase Mode</label>
+        </div>
+        <div class="prop-row">
+          <label>Eraser Size <span class="value" id="eraser-size-value">0.1</span></label>
+          <input type="range" id="eraser-size" min="0.01" max="0.3" step="0.01" value="0.1" oninput="updateEraserSize()">
+        </div>
+      </div>
+    </div>
+    
+    <div class="toolbar-group">
+      <h3 onclick="toggleSection(this)">5b. Patch Tool</h3>
+      <div class="group-content">
+        <div class="toggle-row">
+          <input type="checkbox" id="patch-mode" onchange="togglePatchMode()">
+          <label for="patch-mode">Enable Patch Mode</label>
+        </div>
+        <div class="prop-row">
+          <label>Patch Size <span class="value" id="patch-size-value">0.2</span></label>
+          <input type="range" id="patch-size" min="0.05" max="1" step="0.01" value="0.2" oninput="updatePatchSize()">
+        </div>
+        <div class="prop-row">
+          <label>Rotate X <span class="value" id="patch-rot-x-value">0°</span></label>
+          <input type="range" id="patch-rot-x" min="-180" max="180" step="5" value="0" oninput="updatePatchRotation()">
+        </div>
+        <div class="prop-row">
+          <label>Rotate Y <span class="value" id="patch-rot-y-value">0°</span></label>
+          <input type="range" id="patch-rot-y" min="-180" max="180" step="5" value="0" oninput="updatePatchRotation()">
+        </div>
+        <div class="prop-row">
+          <label>Rotate Z <span class="value" id="patch-rot-z-value">0°</span></label>
+          <input type="range" id="patch-rot-z" min="-180" max="180" step="5" value="0" oninput="updatePatchRotation()">
+        </div>
+        <div class="prop-row">
+          <label>Distance <span class="value" id="patch-distance-value">0.25</span></label>
+          <input type="range" id="patch-distance" min="0" max="1" step="0.005" value="0.25" oninput="updatePatchDistance()">
+        </div>
+        <button class="btn" onclick="resetPatchRotation()">Reset Rotation</button>
+      </div>
+    </div>
+    
+    <div class="toolbar-group">
+      <h3 onclick="toggleSection(this)">6. Export</h3>
+      <div class="group-content">
+        <button class="btn primary" id="export-btn" onclick="exportGLB()" disabled>Export .glb</button>
+      </div>
     </div>
   </div>
   
   <div id="status">
-    <span class="hint">Controls:</span> SparkControls (click/drag + WASD). This matches the main app FPS feel.
+    <span class="hint">Controls:</span> SparkControls (click/drag + WASD). Drop .spz for splat→mesh conversion, or .glb for mesh editing.
   </div>
 
   <script type="importmap">
@@ -237,6 +328,7 @@
   <script type="module">
     import * as THREE from 'three';
     import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { SplatMesh, SparkControls } from '@sparkjsdev/spark';
     
     // ========== Scene Setup ==========
@@ -259,7 +351,7 @@
     localFrame.add(camera);
     localFrame.position.set(5, 5, 5);
 
-    let moveSpeedScalar = 1.0;
+    let moveSpeedScalar = 5.0;
 
     const controls = new SparkControls({
       renderer,
@@ -267,16 +359,17 @@
     });
 
     // Optional yaw with Q/E keys
-    const keyState = { q: false, e: false };
+    const keyState = { q: false, e: false, i: false, j: false, k: false, l: false, u: false, o: false, y: false, h: false };
     const yawSpeed = 0.02; // radians per frame baseline
+    const patchRotSpeed = 3; // degrees per frame for patch rotation
 
     document.addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase();
-      if (k === 'q' || k === 'e') keyState[k] = true;
+      if (k in keyState) keyState[k] = true;
     });
     document.addEventListener('keyup', (e) => {
       const k = e.key.toLowerCase();
-      if (k === 'q' || k === 'e') keyState[k] = false;
+      if (k in keyState) keyState[k] = false;
     });
     
     // Grid helper
@@ -295,14 +388,25 @@
     let sampledPositions = []; // Downsampled positions (Vector3)
     let pointsCloud = null; // THREE.Points for visualization
     let generatedMesh = null; // Generated collision mesh
+    let edgesHelper = null; // EdgesHelper for edge overlay
+    let verticesCloud = null; // Points for vertex visualization
     
     // ========== Eraser State ==========
     let eraserMode = false;
-    let eraserSize = 0.5;
+    let eraserSize = 0.1;
     let eraserSphere = null;
     let isErasing = false;
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
+    
+    // ========== Patch Tool State ==========
+    let patchMode = false;
+    let patchSize = 0.2;
+    let patchRotX = 0;
+    let patchRotY = 0;
+    let patchRotZ = 0;
+    let patchDistance = 0.25;
+    let patchPlane = null;
     
     // Create eraser sphere (initially hidden)
     const eraserGeometry = new THREE.SphereGeometry(1, 16, 16);
@@ -325,6 +429,44 @@
     );
     eraserSphere.add(eraserWireframe);
     
+    // Create patch plane (initially hidden)
+    const patchGeometry = new THREE.PlaneGeometry(1, 1);
+    const patchMaterial = new THREE.MeshBasicMaterial({
+      color: 0x44ff44,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      depthWrite: false
+    });
+    patchPlane = new THREE.Mesh(patchGeometry, patchMaterial);
+    patchPlane.visible = false;
+    patchPlane.scale.setScalar(patchSize);
+    scene.add(patchPlane);
+    
+    // Add wireframe outline to patch plane
+    const patchEdges = new THREE.EdgesGeometry(patchGeometry);
+    const patchWireframe = new THREE.LineSegments(
+      patchEdges,
+      new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 })
+    );
+    patchPlane.add(patchWireframe);
+    
+    // Add normal indicator arrow to show which way the patch faces
+    const arrowLength = 0.5;
+    const arrowGeometry = new THREE.BufferGeometry();
+    arrowGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 0, 0,
+      0, 0, arrowLength,
+      0, 0, arrowLength,
+      0.05, 0, arrowLength - 0.1,
+      0, 0, arrowLength,
+      -0.05, 0, arrowLength - 0.1
+    ], 3));
+    const arrowMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff });
+    const normalArrow = new THREE.LineSegments(arrowGeometry, arrowMaterial);
+    patchPlane.add(normalArrow);
+    
     // ========== File Loading ==========
     const fileInput = document.getElementById('file-input');
     
@@ -338,14 +480,24 @@
       e.preventDefault();
       e.stopPropagation();
       const file = e.dataTransfer.files[0];
-      if (file && (file.name.endsWith('.spz') || file.name.endsWith('.ply') || file.name.endsWith('.splat'))) {
-        await loadSplatFile(file);
+      if (file) {
+        if (file.name.endsWith('.glb') || file.name.endsWith('.gltf')) {
+          await loadGLBFile(file);
+        } else if (file.name.endsWith('.spz') || file.name.endsWith('.ply') || file.name.endsWith('.splat')) {
+          await loadSplatFile(file);
+        }
       }
     });
     
     fileInput.addEventListener('change', async (e) => {
       const file = e.target.files[0];
-      if (file) await loadSplatFile(file);
+      if (file) {
+        if (file.name.endsWith('.glb') || file.name.endsWith('.gltf')) {
+          await loadGLBFile(file);
+        } else {
+          await loadSplatFile(file);
+        }
+      }
     });
     
     async function loadSplatFile(file) {
@@ -406,6 +558,104 @@
         
       } catch (err) {
         console.error('Error loading splat:', err);
+        setStatus('Error: ' + err.message);
+      }
+    }
+    
+    // ========== GLB Loading ==========
+    async function loadGLBFile(file) {
+      try {
+        setStatus('Loading GLB file...');
+        console.log('Loading GLB:', file.name, file.size, 'bytes');
+        
+        const arrayBuffer = await file.arrayBuffer();
+        const loader = new GLTFLoader();
+        
+        // Parse the GLB from array buffer
+        const gltf = await new Promise((resolve, reject) => {
+          loader.parse(arrayBuffer, '', resolve, reject);
+        });
+        
+        console.log('GLB loaded:', gltf);
+        
+        // Remove existing mesh if any
+        if (generatedMesh) {
+          scene.remove(generatedMesh);
+          generatedMesh.geometry.dispose();
+          generatedMesh.material.dispose();
+          generatedMesh = null;
+        }
+        
+        // Find the first mesh in the loaded scene
+        let foundMesh = null;
+        gltf.scene.traverse((child) => {
+          if (!foundMesh && child.isMesh) {
+            foundMesh = child;
+          }
+        });
+        
+        if (!foundMesh) {
+          setStatus('Error: No mesh found in GLB file');
+          return;
+        }
+        
+        // Clone the geometry and create a new mesh with our material
+        const geometry = foundMesh.geometry.clone();
+        
+        // Make sure we have an index buffer for the eraser tool
+        if (!geometry.index) {
+          // Convert to indexed geometry
+          const positions = geometry.getAttribute('position');
+          const indices = [];
+          for (let i = 0; i < positions.count; i++) {
+            indices.push(i);
+          }
+          geometry.setIndex(indices);
+        }
+        
+        const material = new THREE.MeshStandardMaterial({
+          color: 0x88aaff,
+          side: THREE.DoubleSide,
+          wireframe: document.getElementById('show-wireframe').checked
+        });
+        
+        generatedMesh = new THREE.Mesh(geometry, material);
+        
+        // Apply the world transform from the original mesh
+        foundMesh.updateWorldMatrix(true, false);
+        generatedMesh.applyMatrix4(foundMesh.matrixWorld);
+        
+        generatedMesh.visible = document.getElementById('show-mesh').checked;
+        scene.add(generatedMesh);
+        
+        // Update helpers (edges/vertices overlays)
+        updateMeshHelpers();
+        
+        // Update stats
+        const vertCount = geometry.getAttribute('position').count;
+        const triCount = geometry.index ? geometry.index.count / 3 : vertCount / 3;
+        document.getElementById('stat-verts').textContent = vertCount.toLocaleString();
+        document.getElementById('stat-tris').textContent = Math.floor(triCount).toLocaleString();
+        
+        // Enable export
+        document.getElementById('export-btn').disabled = false;
+        
+        // Center camera on the loaded mesh
+        const bounds = new THREE.Box3().setFromObject(generatedMesh);
+        const center = bounds.getCenter(new THREE.Vector3());
+        const size = bounds.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z) || 10;
+        
+        localFrame.position.set(
+          center.x + maxDim * 0.8,
+          center.y + maxDim * 0.5,
+          center.z + maxDim * 0.8
+        );
+        
+        setStatus(`Loaded GLB with ${vertCount.toLocaleString()} vertices, ${Math.floor(triCount).toLocaleString()} triangles. Use erase tool to edit.`);
+        
+      } catch (err) {
+        console.error('Error loading GLB:', err);
         setStatus('Error: ' + err.message);
       }
     }
@@ -609,6 +859,9 @@
         generatedMesh = new THREE.Mesh(geometry, material);
         generatedMesh.visible = document.getElementById('show-mesh').checked;
         scene.add(generatedMesh);
+        
+        // Update helpers (edges/vertices overlays)
+        updateMeshHelpers();
         
         // Update stats
         document.getElementById('stat-verts').textContent = (vertices.length / 3).toLocaleString();
@@ -1043,6 +1296,11 @@
     ];
     
     // ========== UI Functions ==========
+    window.toggleSection = function(header) {
+      const group = header.parentElement;
+      group.classList.toggle('collapsed');
+    };
+    
     window.updateSampleRate = function() {
       const val = document.getElementById('sample-rate').value;
       document.getElementById('sample-rate-value').textContent = val + '%';
@@ -1076,6 +1334,13 @@
       eraserMode = document.getElementById('erase-mode').checked;
       eraserSphere.visible = eraserMode;
       
+      // Disable patch mode if erase mode is enabled
+      if (eraserMode && patchMode) {
+        document.getElementById('patch-mode').checked = false;
+        patchMode = false;
+        patchPlane.visible = false;
+      }
+      
       // Only disable pointer/mouse controls when in erase mode, keep WASD movement
       if (controls.pointerControls) controls.pointerControls.enable = !eraserMode;
       // fpsMovement (WASD) stays enabled so you can navigate while erasing
@@ -1091,9 +1356,168 @@
     
     window.updateEraserSize = function() {
       eraserSize = parseFloat(document.getElementById('eraser-size').value);
-      document.getElementById('eraser-size-value').textContent = eraserSize.toFixed(1);
+      document.getElementById('eraser-size-value').textContent = eraserSize.toFixed(2);
       eraserSphere.scale.setScalar(eraserSize);
     };
+    
+    // ========== Patch Tool Functions ==========
+    window.togglePatchMode = function() {
+      patchMode = document.getElementById('patch-mode').checked;
+      patchPlane.visible = patchMode;
+      
+      // Disable erase mode if patch mode is enabled
+      if (patchMode && eraserMode) {
+        document.getElementById('erase-mode').checked = false;
+        toggleEraseMode();
+      }
+      
+      // Disable pointer controls when in patch mode
+      if (controls.pointerControls) controls.pointerControls.enable = !patchMode;
+      
+      if (patchMode) {
+        setStatus('Patch mode: Click to place. I/K=pitch, J/L=yaw, U/O=roll, Y/H=distance. WASD to move.');
+        container.style.cursor = 'crosshair';
+      } else {
+        setStatus('Patch mode disabled');
+        container.style.cursor = 'grab';
+      }
+    };
+    
+    window.updatePatchSize = function() {
+      patchSize = parseFloat(document.getElementById('patch-size').value);
+      document.getElementById('patch-size-value').textContent = patchSize.toFixed(2);
+      patchPlane.scale.setScalar(patchSize);
+    };
+    
+    window.updatePatchRotation = function() {
+      patchRotX = parseFloat(document.getElementById('patch-rot-x').value);
+      patchRotY = parseFloat(document.getElementById('patch-rot-y').value);
+      patchRotZ = parseFloat(document.getElementById('patch-rot-z').value);
+      
+      document.getElementById('patch-rot-x-value').textContent = patchRotX + '°';
+      document.getElementById('patch-rot-y-value').textContent = patchRotY + '°';
+      document.getElementById('patch-rot-z-value').textContent = patchRotZ + '°';
+      
+      // Apply rotation to patch plane
+      patchPlane.rotation.set(
+        THREE.MathUtils.degToRad(patchRotX),
+        THREE.MathUtils.degToRad(patchRotY),
+        THREE.MathUtils.degToRad(patchRotZ)
+      );
+    };
+    
+    window.updatePatchDistance = function() {
+      patchDistance = parseFloat(document.getElementById('patch-distance').value);
+      document.getElementById('patch-distance-value').textContent = patchDistance.toFixed(3);
+    };
+    
+    window.resetPatchRotation = function() {
+      document.getElementById('patch-rot-x').value = 0;
+      document.getElementById('patch-rot-y').value = 0;
+      document.getElementById('patch-rot-z').value = 0;
+      updatePatchRotation();
+    };
+    
+    // Update patch plane position based on mouse/raycast
+    function updatePatchPosition(event) {
+      if (!patchMode) return;
+      
+      const rect = container.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      raycaster.setFromCamera(mouse, camera);
+      
+      // Always place at user-controlled distance along ray (no mesh snapping)
+      const point = raycaster.ray.at(patchDistance, new THREE.Vector3());
+      patchPlane.position.copy(point);
+    }
+    
+    // Place a patch (add triangles to the mesh)
+    function placePatch() {
+      if (!patchMode) return;
+      
+      // Create mesh if it doesn't exist yet
+      if (!generatedMesh) {
+        // Create a new empty mesh
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
+        geometry.setIndex([]);
+        
+        const material = new THREE.MeshStandardMaterial({
+          color: 0x88aaff,
+          side: THREE.DoubleSide,
+          wireframe: document.getElementById('show-wireframe').checked
+        });
+        
+        generatedMesh = new THREE.Mesh(geometry, material);
+        generatedMesh.visible = document.getElementById('show-mesh').checked;
+        scene.add(generatedMesh);
+        
+        document.getElementById('export-btn').disabled = false;
+      }
+      
+      // Get the patch plane's world vertices
+      const patchGeo = new THREE.PlaneGeometry(patchSize, patchSize);
+      const tempMesh = new THREE.Mesh(patchGeo);
+      tempMesh.position.copy(patchPlane.position);
+      tempMesh.rotation.copy(patchPlane.rotation);
+      tempMesh.updateMatrixWorld(true);
+      
+      // Get existing geometry data
+      const existingPositions = generatedMesh.geometry.getAttribute('position');
+      const existingIndex = generatedMesh.geometry.getIndex();
+      
+      const existingPosArray = existingPositions ? Array.from(existingPositions.array) : [];
+      const existingIndexArray = existingIndex ? Array.from(existingIndex.array) : [];
+      
+      // Calculate base vertex index for new vertices
+      const baseIndex = existingPosArray.length / 3;
+      
+      // Get patch plane vertices in world space
+      const patchPositions = patchGeo.getAttribute('position');
+      const patchIndex = patchGeo.getIndex();
+      
+      // Transform patch vertices to world space and add them
+      const vertex = new THREE.Vector3();
+      for (let i = 0; i < patchPositions.count; i++) {
+        vertex.set(
+          patchPositions.getX(i),
+          patchPositions.getY(i),
+          patchPositions.getZ(i)
+        );
+        vertex.applyMatrix4(tempMesh.matrixWorld);
+        existingPosArray.push(vertex.x, vertex.y, vertex.z);
+      }
+      
+      // Add patch indices (offset by base index)
+      for (let i = 0; i < patchIndex.count; i++) {
+        existingIndexArray.push(patchIndex.getX(i) + baseIndex);
+      }
+      
+      // Dispose old geometry and create new one (fixes WebGL buffer issues)
+      const oldGeometry = generatedMesh.geometry;
+      const newGeometry = new THREE.BufferGeometry();
+      newGeometry.setAttribute('position', new THREE.Float32BufferAttribute(existingPosArray, 3));
+      newGeometry.setIndex(existingIndexArray);
+      newGeometry.computeVertexNormals();
+      newGeometry.computeBoundingSphere();
+      
+      generatedMesh.geometry = newGeometry;
+      oldGeometry.dispose();
+      
+      // Clean up temp geometry
+      patchGeo.dispose();
+      
+      // Update stats
+      document.getElementById('stat-verts').textContent = (existingPosArray.length / 3).toLocaleString();
+      document.getElementById('stat-tris').textContent = (existingIndexArray.length / 3).toLocaleString();
+      
+      // Update helpers
+      updateMeshHelpers();
+      
+      setStatus(`Patch placed. Total: ${(existingPosArray.length / 3).toLocaleString()} vertices, ${(existingIndexArray.length / 3).toLocaleString()} triangles`);
+    }
     
     // Update eraser sphere position based on mouse/raycast
     function updateEraserPosition(event) {
@@ -1167,9 +1591,10 @@
       document.getElementById('stat-tris').textContent = (newIndices.length / 3).toLocaleString();
     }
     
-    // Mouse event handlers for eraser
+    // Mouse event handlers for eraser and patch
     container.addEventListener('mousemove', (e) => {
       updateEraserPosition(e);
+      updatePatchPosition(e);
       if (isErasing) {
         eraseAtPosition();
       }
@@ -1180,11 +1605,18 @@
         isErasing = true;
         eraseAtPosition();
       }
+      if (patchMode && e.button === 0) {
+        placePatch();
+      }
     });
     
     container.addEventListener('mouseup', (e) => {
       if (e.button === 0) {
-        isErasing = false;
+        if (isErasing) {
+          isErasing = false;
+          // Update helpers after erasing is done
+          updateMeshHelpers();
+        }
       }
     });
     
@@ -1209,6 +1641,96 @@
         generatedMesh.material.wireframe = document.getElementById('show-wireframe').checked;
       }
     };
+    
+    window.toggleEdges = function() {
+      const showEdges = document.getElementById('show-edges').checked;
+      if (showEdges && generatedMesh) {
+        updateEdgesHelper();
+      }
+      if (edgesHelper) {
+        edgesHelper.visible = showEdges;
+      }
+    };
+    
+    window.toggleVertices = function() {
+      const showVertices = document.getElementById('show-vertices').checked;
+      if (showVertices && generatedMesh) {
+        updateVerticesCloud();
+      }
+      if (verticesCloud) {
+        verticesCloud.visible = showVertices;
+      }
+    };
+    
+    function updateEdgesHelper() {
+      // Remove existing edges helper
+      if (edgesHelper) {
+        scene.remove(edgesHelper);
+        edgesHelper.geometry.dispose();
+        edgesHelper.material.dispose();
+        edgesHelper = null;
+      }
+      
+      if (!generatedMesh) return;
+      
+      // Create edges geometry from mesh
+      const edgesGeometry = new THREE.EdgesGeometry(generatedMesh.geometry, 1); // threshold angle in degrees
+      const edgesMaterial = new THREE.LineBasicMaterial({ 
+        color: 0xffff00,
+        linewidth: 2,
+        transparent: true,
+        opacity: 0.8
+      });
+      
+      edgesHelper = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+      edgesHelper.position.copy(generatedMesh.position);
+      edgesHelper.rotation.copy(generatedMesh.rotation);
+      edgesHelper.scale.copy(generatedMesh.scale);
+      edgesHelper.visible = document.getElementById('show-edges').checked;
+      scene.add(edgesHelper);
+    }
+    
+    function updateVerticesCloud() {
+      // Remove existing vertices cloud
+      if (verticesCloud) {
+        scene.remove(verticesCloud);
+        verticesCloud.geometry.dispose();
+        verticesCloud.material.dispose();
+        verticesCloud = null;
+      }
+      
+      if (!generatedMesh) return;
+      
+      const positions = generatedMesh.geometry.getAttribute('position');
+      if (!positions) return;
+      
+      // Create points geometry from mesh vertices
+      const pointsGeometry = new THREE.BufferGeometry();
+      pointsGeometry.setAttribute('position', positions.clone());
+      
+      const pointsMaterial = new THREE.PointsMaterial({
+        color: 0xff4444,
+        size: 0.05,
+        sizeAttenuation: true
+      });
+      
+      verticesCloud = new THREE.Points(pointsGeometry, pointsMaterial);
+      verticesCloud.position.copy(generatedMesh.position);
+      verticesCloud.rotation.copy(generatedMesh.rotation);
+      verticesCloud.scale.copy(generatedMesh.scale);
+      verticesCloud.visible = document.getElementById('show-vertices').checked;
+      scene.add(verticesCloud);
+    }
+    
+    // Update helpers when mesh changes
+    function updateMeshHelpers() {
+      if (document.getElementById('show-edges').checked) {
+        updateEdgesHelper();
+      }
+      if (document.getElementById('show-vertices').checked) {
+        updateVerticesCloud();
+      }
+    }
     
     window.generateMesh = generateMesh;
     
@@ -1282,6 +1804,84 @@
         camera.rotation.y += yawSpeed * (delta / 16);
       } else if (keyState.e) {
         camera.rotation.y -= yawSpeed * (delta / 16);
+      }
+      
+      // Apply patch rotation from IJKL UO keys when in patch mode
+      if (patchMode) {
+        let rotChanged = false;
+        const rotDelta = patchRotSpeed * (delta / 16);
+        
+        // I/K for X rotation (pitch)
+        if (keyState.i) {
+          patchRotX -= rotDelta;
+          rotChanged = true;
+        } else if (keyState.k) {
+          patchRotX += rotDelta;
+          rotChanged = true;
+        }
+        
+        // J/L for Y rotation (yaw)
+        if (keyState.j) {
+          patchRotY -= rotDelta;
+          rotChanged = true;
+        } else if (keyState.l) {
+          patchRotY += rotDelta;
+          rotChanged = true;
+        }
+        
+        // U/O for Z rotation (roll)
+        if (keyState.u) {
+          patchRotZ -= rotDelta;
+          rotChanged = true;
+        } else if (keyState.o) {
+          patchRotZ += rotDelta;
+          rotChanged = true;
+        }
+        
+        // Y/H for distance
+        const distDelta = 0.005 * (delta / 16);
+        let distChanged = false;
+        if (keyState.y) {
+          patchDistance = Math.min(1, patchDistance + distDelta);
+          distChanged = true;
+        } else if (keyState.h) {
+          patchDistance = Math.max(0, patchDistance - distDelta);
+          distChanged = true;
+        }
+        if (distChanged) {
+          document.getElementById('patch-distance').value = patchDistance;
+          document.getElementById('patch-distance-value').textContent = patchDistance.toFixed(3);
+        }
+        
+        // Update patch position in real-time when any key changes distance/rotation
+        if (rotChanged || distChanged) {
+          // Recalculate patch position along current ray
+          raycaster.setFromCamera(mouse, camera);
+          const point = raycaster.ray.at(patchDistance, new THREE.Vector3());
+          patchPlane.position.copy(point);
+        }
+        
+        if (rotChanged) {
+          // Clamp to -180 to 180
+          patchRotX = ((patchRotX + 180) % 360 + 360) % 360 - 180;
+          patchRotY = ((patchRotY + 180) % 360 + 360) % 360 - 180;
+          patchRotZ = ((patchRotZ + 180) % 360 + 360) % 360 - 180;
+          
+          // Update sliders
+          document.getElementById('patch-rot-x').value = patchRotX;
+          document.getElementById('patch-rot-y').value = patchRotY;
+          document.getElementById('patch-rot-z').value = patchRotZ;
+          document.getElementById('patch-rot-x-value').textContent = Math.round(patchRotX) + '°';
+          document.getElementById('patch-rot-y-value').textContent = Math.round(patchRotY) + '°';
+          document.getElementById('patch-rot-z-value').textContent = Math.round(patchRotZ) + '°';
+          
+          // Apply rotation to patch plane
+          patchPlane.rotation.set(
+            THREE.MathUtils.degToRad(patchRotX),
+            THREE.MathUtils.degToRad(patchRotY),
+            THREE.MathUtils.degToRad(patchRotZ)
+          );
+        }
       }
 
       renderer.render(scene, camera);
