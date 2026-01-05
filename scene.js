@@ -3,9 +3,11 @@ import { SplatMesh } from "@sparkjsdev/spark";
 import { worldToUniverse } from "./coordinate-transform.js";
 import { setupPortalLighting } from "./port.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 
-// GLTFLoader instance for loading collision meshes
+// Loaders
 const gltfLoader = new GLTFLoader();
+const fbxLoader = new FBXLoader();
 
 /**
  * ProtoScene - Manages the Three.js scene, camera, renderer, and local frame
@@ -181,6 +183,128 @@ export class ProtoScene {
                 }
             );
         });
+    }
+
+    /**
+     * Load a character model (FBX or GLB) with animation
+     * @param {Object} characterData - Character configuration from world.json
+     * @param {string} characterData.name - Character name
+     * @param {string} characterData.model - Model file path
+     * @param {Array<number>} characterData.position - Position [x, y, z]
+     * @param {Array<number>} characterData.rotation - Rotation as quaternion [x, y, z, w] or Euler [x, y, z]
+     * @param {number} characterData.scale - Uniform scale (default 1)
+     * @param {number} world - World number for position offset
+     * @param {Function} resolveUrl - URL resolver function
+     * @returns {Promise<{model: THREE.Group, mixer: THREE.AnimationMixer}>}
+     */
+    async loadCharacter(characterData, world = 0, resolveUrl = null) {
+        const { name, model, position = [0, 0, 0], rotation = [0, 0, 0, 1], scale = 1 } = characterData;
+        
+        console.log(`Loading character "${name}":`, model);
+        
+        // Resolve the URL
+        let url = model;
+        if (resolveUrl && !model.startsWith('http')) {
+            url = resolveUrl(model);
+        }
+        const absoluteURL = new URL(url, window.location.href).href;
+        
+        // Determine loader based on file extension
+        const ext = model.toLowerCase().split('.').pop();
+        const isFBX = ext === 'fbx';
+        
+        return new Promise((resolve, reject) => {
+            const loader = isFBX ? fbxLoader : gltfLoader;
+            
+            loader.load(
+                absoluteURL,
+                (result) => {
+                    // FBX returns the object directly, GLTF has a .scene property
+                    const characterModel = isFBX ? result : result.scene;
+                    
+                    // Set position
+                    characterModel.position.fromArray(position);
+                    
+                    // Transform to universe coordinates if not root world
+                    if (world !== 0) {
+                        const universePos = worldToUniverse(characterModel.position, world);
+                        characterModel.position.copy(universePos);
+                    }
+                    
+                    // Set rotation (support both quaternion [x,y,z,w] and Euler [x,y,z])
+                    if (rotation.length === 4) {
+                        characterModel.quaternion.fromArray(rotation);
+                    } else if (rotation.length === 3) {
+                        characterModel.rotation.fromArray(rotation);
+                    }
+                    
+                    // Set scale
+                    if (typeof scale === 'number') {
+                        characterModel.scale.setScalar(scale);
+                    } else if (Array.isArray(scale)) {
+                        characterModel.scale.fromArray(scale);
+                    }
+                    
+                    // Create animation mixer
+                    const mixer = new THREE.AnimationMixer(characterModel);
+                    
+                    // Get animations (FBX stores them in result.animations, GLTF in result.animations)
+                    const animations = isFBX ? result.animations : result.animations;
+                    
+                    // Play all animations (or just the first one)
+                    if (animations && animations.length > 0) {
+                        console.log(`  Found ${animations.length} animation(s) for "${name}"`);
+                        animations.forEach((clip, index) => {
+                            console.log(`    - ${clip.name || `Animation ${index}`} (${clip.duration.toFixed(2)}s)`);
+                            const action = mixer.clipAction(clip);
+                            action.play();
+                        });
+                    } else {
+                        console.log(`  No animations found for "${name}"`);
+                    }
+                    
+                    // Add to scene
+                    this.scene.add(characterModel);
+                    
+                    console.log(`  Character "${name}" loaded at`, characterModel.position.toArray());
+                    
+                    resolve({ model: characterModel, mixer, animations });
+                },
+                (progress) => {
+                    if (progress.total) {
+                        const pct = (progress.loaded / progress.total * 100).toFixed(0);
+                        console.log(`Loading character "${name}": ${pct}%`);
+                    }
+                },
+                (error) => {
+                    console.error(`Error loading character "${name}":`, error);
+                    reject(error);
+                }
+            );
+        });
+    }
+
+    /**
+     * Remove a character from the scene
+     * @param {{model: THREE.Group, mixer: THREE.AnimationMixer}} character
+     */
+    removeCharacter(character) {
+        if (character.mixer) {
+            character.mixer.stopAllAction();
+        }
+        if (character.model) {
+            this.scene.remove(character.model);
+            character.model.traverse((child) => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(m => m.dispose());
+                    } else {
+                        child.material.dispose();
+                    }
+                }
+            });
+        }
     }
 }
 

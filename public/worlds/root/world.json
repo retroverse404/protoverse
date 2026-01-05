@@ -102,5 +102,28 @@
         "rotation": [0, 0, 0, 1]
       }
     }
+  ],
+  "characters": [
+    {
+      "name": "Timeless Center",
+      "type": "timeless",
+      "position": [0, -2.12, 10],
+      "rotation": [0, 0, 0, 1],
+      "scale": 0.008
+    },
+    {
+      "name": "Timeless Cozy Portal",
+      "type": "timeless",
+      "position": [1.70, -2.12, 13.18],
+      "rotation": [0, 0.78, 0, -0.63],
+      "scale": 0.008
+    },
+    {
+      "name": "Timeless Memory Exit",
+      "type": "timeless",
+      "position": [-7.27, -2.12, 8.10],
+      "rotation": [0, 1, 0, 0],
+      "scale": 0.008
+    }
   ]
 }

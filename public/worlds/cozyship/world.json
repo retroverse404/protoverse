@@ -5,5 +5,20 @@
   "position": [-7.89, 6.74, -0.31],
   "rotation": [0, -1.59, 0, 0],
   "portals": [
+  ],
+  "characters": [
+    {
+      "name": "Amy",
+      "type": "amy",
+      "position": [-7.86, 5.34, 6.05],
+      "rotation": [0, 0, 0, 1],
+      "scale": 0.015,
+      "waypoints": [
+        [0, 0, 0],
+        [2, 0, 0],
+        [2, 0, 2],
+        [0, 0, 2]
+      ]
+    }
   ]
 }

@@ -184,6 +184,7 @@ export function applyVRRotation(localFrame, renderer, deltaTime) {
  * @param {Function} params.updatePortalDisks - Function to update portal disks
  * @param {Function} params.updateMultiplayer - Function to update multiplayer (optional)
  * @param {Function} params.updatePhysics - Function to update physics (optional)
+ * @param {Function} params.updateCharacters - Function to update character animations (optional)
  * @param {boolean} params.animatePortal - Whether to animate portals
  * @returns {Function} Animation loop callback function
  */
@@ -199,6 +200,7 @@ export function createAnimationLoop({
     updatePortalDisks,
     updateMultiplayer,
     updatePhysics,
+    updateCharacters,
     animatePortal = true
 }) {
     let lastTime = performance.now();
@@ -224,6 +226,11 @@ export function createAnimationLoop({
         // Update physics (if enabled)
         if (updatePhysics) {
             updatePhysics(deltaTime);
+        }
+
+        // Update character animations
+        if (updateCharacters) {
+            updateCharacters(deltaTime);
         }
 
         // Update HUD

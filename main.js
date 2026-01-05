@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { updateHUD, createAudioToggleButton, createCollisionMeshToggleButton, createPhysicsToggleButton, initHud, getAudioEnabled } from "./hud.js";
 import { initAudio, playWorldAudio, handleAudioToggle, setCurrentWorldData, ensureAudioContext, getCurrentWorldData } from "./audio.js";
 import { initControls, createAnimationLoop } from "./controls.js";
@@ -5,6 +6,7 @@ import { ProtoVerse } from "./proto.js";
 import { ProtoScene, loadWorldJSON } from "./scene.js";
 import { createUrlResolver } from "./paths.js";
 import { ProtoverseMultiplayer } from "./multiplayer.js";
+import { CharacterManager } from "./character-manager.js";
 import {
     initPhysics, 
     createPlayerBody, 
@@ -31,6 +33,11 @@ const camera = protoScene.getCamera();
 const renderer = protoScene.getRenderer();
 const localFrame = protoScene.getLocalFrame();
 
+// ========== Audio Listener Setup ==========
+// Create audio listener for positional audio (attached to localFrame, like sparkxrstart)
+const audioListener = new THREE.AudioListener();
+localFrame.add(audioListener);
+
 // ========== ProtoVerse Setup ==========
 const protoVerse = new ProtoVerse(protoScene, {
     preloadHops: config.world.preloadHops,
@@ -39,6 +46,7 @@ const protoVerse = new ProtoVerse(protoScene, {
     urlBase: config.urls.urlBase,
     useCdn: config.urls.useCdn,
     backgroundPreloadCollision: config.world.backgroundPreloadCollision,
+    waitForFullLoad: config.world.waitForFullLoad,
     resolveUrl: resolveUrl,
     onWorldChange: (worldUrl, worldData) => {
         // Handle world change (e.g., play audio)
@@ -53,6 +61,15 @@ const protoVerse = new ProtoVerse(protoScene, {
         }
     }
 });
+
+// ========== Character Manager Setup ==========
+const characterManager = new CharacterManager(
+    protoScene.getScene(),
+    protoScene.getLocalFrame(),
+    resolveUrl,
+    audioListener  // For positional character audio
+);
+protoVerse.setCharacterManager(characterManager);
 
 // ========== Multiplayer Setup ==========
 const playerName = `${config.multiplayer.playerNamePrefix}-${Math.floor(Math.random() * 10000)}`;
@@ -182,6 +199,7 @@ const animationLoop = createAnimationLoop({
         );
     } : null,
     updatePhysics: (deltaTime) => updatePhysics(deltaTime),
+    updateCharacters: (deltaTime) => characterManager.update(deltaTime),
     animatePortal: config.portals.animatePortal,
 });
 

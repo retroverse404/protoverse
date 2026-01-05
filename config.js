@@ -9,6 +9,7 @@ export const config = {
     // ========== World Settings ==========
     world: {
         // Starting world (relative path from urlBase)
+        //rootWorld: "/cozyship/world.json",
         rootWorld: "/root/world.json",
         
         // Number of portal hops to preload worlds for
@@ -20,6 +21,11 @@ export const config = {
         // false = load collision meshes only when entering a world
         backgroundPreloadCollision: true,
         
+        // Wait for all assets (splats, collision meshes, characters) to load before proceeding
+        // true = synchronous loading with loading screen (guaranteed no pop-in)
+        // false = background loading (faster initial view, assets may pop in)
+        waitForFullLoad: true,
+        
         // Starting camera rotation (Euler angles in radians: [x, y, z] or [pitch, yaw, roll])
         // null = use rotation from world.json
         startingCameraRotation: [0.06, 3.03, 0.01],
@@ -28,7 +34,7 @@ export const config = {
     // ========== URL / CDN Settings ==========
     urls: {
         // Use CDN for assets (splats, collision meshes, etc.)
-        useCdn: true,
+        useCdn: false,
         
         // CDN base URL (used when useCdn is true)
         cdnBase: "https://public-spz.t3.storage.dev",

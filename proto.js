@@ -23,6 +23,7 @@ export class ProtoVerseConfig {
         this.resolveUrl = options.resolveUrl ?? null; // Function to resolve URLs
         this.onWorldChange = options.onWorldChange ?? null; // Callback when world changes (worldUrl, worldData)
         this.backgroundPreloadCollision = options.backgroundPreloadCollision ?? true; // Preload collision meshes in background
+        this.waitForFullLoad = options.waitForFullLoad ?? false; // Wait for all assets before proceeding
     }
 }
 
@@ -42,6 +43,9 @@ export class ProtoVerse {
         this.worldState = new WorldState();
         this.verseDag = new VerseDag();
         this.currentWorldUrl = null;
+        
+        // Character manager (set via setCharacterManager)
+        this.characterManager = null;
         
         // Initialize portal system
         this.portals = new SparkPortals({
@@ -65,6 +69,14 @@ export class ProtoVerse {
             console.log("Collision mesh toggle event received, visible:", visible);
             this._updateAllCollisionMeshVisibility(visible);
         });
+    }
+    
+    /**
+     * Set the character manager instance
+     * @param {CharacterManager} characterManager
+     */
+    setCharacterManager(characterManager) {
+        this.characterManager = characterManager;
     }
 
     /**
@@ -220,6 +232,16 @@ export class ProtoVerse {
                     state.collisionMesh = null;
                 }
                 
+                // Remove characters from scene
+                if (this.characterManager) {
+                    this.characterManager.removeWorldCharacters(worldUrl);
+                } else if (state.characters) {
+                    for (const character of state.characters) {
+                        this.protoScene.removeCharacter(character);
+                    }
+                    state.characters = null;
+                }
+                
                 this.worldState.delete(worldUrl);
             }
         }
@@ -243,13 +265,7 @@ export class ProtoVerse {
             console.log("Processing world:", worldUrl);
             console.log("  worldData keys:", worldData ? Object.keys(worldData) : "null");
             console.log("  collisionUrl:", worldData?.collisionUrl);
-            
-            // Skip mesh loading if already loaded
-            if (this.worldState.has(worldUrl) && this.worldState.get(worldUrl).mesh) {
-                console.log("World mesh already loaded:", worldUrl);
-                loadedWorlds++;
-                continue;
-            }
+            console.log("  characters:", worldData?.characters?.length || 0);
 
             // Allocate worldno (0 for root, new number for others)
             const isRoot = (worldUrl === newRootUrl);
@@ -275,12 +291,14 @@ export class ProtoVerse {
                 console.log("  Mesh position:", mesh.position.toArray());
             }
             
-            // Load collision mesh ONLY for the current root world (lazy load others on portal crossing)
-            // This dramatically speeds up initial load by deferring non-essential collision meshes
+            // Load collision mesh for current root, or ALL worlds if waitForFullLoad is true
+            // waitForFullLoad = true: synchronous loading (no pop-in, slower initial load)
+            // waitForFullLoad = false: lazy load non-root worlds (faster initial load, may pop in)
             const isCurrentRoot = (worldUrl === newRootUrl);
+            const shouldLoadCollision = isCurrentRoot || this.config.waitForFullLoad;
             
-            if (!state.collisionMesh && worldData.collisionUrl && isCurrentRoot) {
-                console.log("Loading collision mesh for root world:", worldUrl);
+            if (!state.collisionMesh && worldData.collisionUrl && shouldLoadCollision) {
+                console.log(`Loading collision mesh for ${isCurrentRoot ? 'root' : 'preload'} world:`, worldUrl);
                 console.log("  collisionUrl from JSON:", worldData.collisionUrl);
                 
                 // Show loading bar for collision mesh (even if not initial load)
@@ -324,8 +342,76 @@ export class ProtoVerse {
                 }
             } else if (!worldData.collisionUrl) {
                 console.log("No collisionUrl specified for:", worldUrl);
-            } else if (!isCurrentRoot && worldData.collisionUrl) {
+            } else if (!shouldLoadCollision && worldData.collisionUrl) {
                 console.log("Deferring collision mesh load for non-root world:", worldUrl);
+            }
+            
+            // Preload characters for ALL worlds in plan (hidden initially, shown when world becomes root)
+            
+            if (this.characterManager && worldData.characters && worldData.characters.length > 0) {
+                console.log(`[Proto] Has CharacterManager and ${worldData.characters.length} character(s)`);
+                if (!this.characterManager.hasCharacters(worldUrl)) {
+                    console.log("[Proto] Preloading characters via CharacterManager for:", worldUrl, isCurrentRoot ? "(visible)" : "(hidden)");
+                    
+                    // Get world position from world.json
+                    const worldPosition = worldData.position || [0, 0, 0];
+                    console.log("[Proto] World position for characters:", worldPosition);
+                    
+                    for (const charData of worldData.characters) {
+                        console.log("[Proto] Spawning character:", charData);
+                        try {
+                            await this.characterManager.spawnCharacter(
+                                charData,
+                                worldPosition,
+                                worldno,
+                                worldUrl
+                            );
+                        } catch (error) {
+                            console.error("Failed to spawn character:", charData.type || charData.name, error);
+                        }
+                    }
+                    
+                    // Set visibility based on whether this is current root
+                    this.characterManager.setWorldCharactersVisible(worldUrl, isCurrentRoot);
+                } else {
+                    // Characters already loaded - just update visibility
+                    this.characterManager.setWorldCharactersVisible(worldUrl, isCurrentRoot);
+                    if (isCurrentRoot) {
+                        console.log("Showing preloaded characters for:", worldUrl);
+                    }
+                }
+            } else if (!this.characterManager && worldData.characters && worldData.characters.length > 0) {
+                // Fallback: use old protoScene.loadCharacter method
+                if (!state.characters) {
+                    console.log("Preloading characters (legacy) for:", worldUrl, isCurrentRoot ? "(visible)" : "(hidden)");
+                    state.characters = [];
+                    
+                    for (const charData of worldData.characters) {
+                        try {
+                            const character = await this.protoScene.loadCharacter(
+                                charData,
+                                worldno,
+                                this._resolveUrl.bind(this)
+                            );
+                            if (!isCurrentRoot && character.model) {
+                                character.model.visible = false;
+                            }
+                            state.characters.push(character);
+                        } catch (error) {
+                            console.error("Failed to load character:", charData.name, error);
+                        }
+                    }
+                } else if (state.characters.length > 0) {
+                    const shouldBeVisible = isCurrentRoot;
+                    for (const character of state.characters) {
+                        if (character.model) {
+                            character.model.visible = shouldBeVisible;
+                        }
+                    }
+                    if (shouldBeVisible) {
+                        console.log("Showing preloaded characters for:", worldUrl);
+                    }
+                }
             }
             
             loadedWorlds++;
@@ -483,7 +569,8 @@ export class ProtoVerse {
         }
         
         // Start background preloading of collision meshes for nearby worlds
-        if (this.config.backgroundPreloadCollision) {
+        // Skip if waitForFullLoad is true (already loaded synchronously)
+        if (this.config.backgroundPreloadCollision && !this.config.waitForFullLoad) {
             this._preloadCollisionMeshesInBackground(rootUrl);
         }
     }
@@ -566,6 +653,29 @@ export class ProtoVerse {
      */
     updatePortals() {
         this.portals.animateLoopHook();
+    }
+
+    /**
+     * Update character animations (legacy - prefer using CharacterManager directly)
+     * @param {number} deltaTime - Time since last frame in seconds
+     */
+    updateCharacters(deltaTime) {
+        // If using CharacterManager, it handles updates directly
+        if (this.characterManager) {
+            this.characterManager.update(deltaTime);
+            return;
+        }
+        
+        // Legacy: update characters stored in world state
+        for (const [worldUrl, state] of this.worldState.entries()) {
+            if (state.characters) {
+                for (const character of state.characters) {
+                    if (character.mixer) {
+                        character.mixer.update(deltaTime);
+                    }
+                }
+            }
+        }
     }
 
     /**
