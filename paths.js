@@ -8,6 +8,9 @@
 export function createUrlResolver(options = {}) {
     const { useCdn = false, urlBase = "/worlds" } = options;
     
+    // Paths that should resolve from root, not from urlBase
+    const rootPaths = ['/characters/'];
+    
     /**
      * Resolve a relative path to a full URL based on URL_BASE
      * @param {string} relativePath - Path like "/cozyship/world.json"
@@ -17,6 +20,13 @@ export function createUrlResolver(options = {}) {
         // If already an absolute URL, return as-is
         if (relativePath.startsWith('http')) {
             return relativePath;
+        }
+        
+        // Check if this path should resolve from root (e.g., /characters/)
+        for (const rootPath of rootPaths) {
+            if (relativePath.startsWith(rootPath)) {
+                return relativePath; // Return as-is, it's already a valid path from root
+            }
         }
         
         // Remove leading slash if present (we'll add it back)

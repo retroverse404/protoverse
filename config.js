@@ -10,7 +10,7 @@ export const config = {
     world: {
         // Starting world (relative path from urlBase)
         //rootWorld: "/cozyship/world.json",
-        rootWorld: "/root/world.json",
+        rootWorld: "/theatership/world.json",
         
         // Number of portal hops to preload worlds for
         // Higher = more worlds loaded in advance, but more memory/bandwidth
@@ -77,10 +77,10 @@ export const config = {
     // ========== Multiplayer Settings ==========
     multiplayer: {
         // Enable multiplayer features
-        enabled: false,
+        enabled: true,
         
         // WebSocket server URL (null = use environment variable VITE_WS_URL)
-        wsUrl: null,
+        wsUrl: "ws://localhost:8765",
         
         // Player name prefix (random number appended)
         playerNamePrefix: "player",
@@ -93,6 +93,15 @@ export const config = {
         
         // Thrust sound volume (0.0 - 1.0)
         thrustVolume: 0.5,
+    },
+    
+    // ========== AI Settings ==========
+    ai: {
+        // Enable AI chat features (requires VITE_BRAINTRUST_API_KEY)
+        enabled: true,
+        
+        // Braintrust project name
+        projectName: "protoverse",
     },
     
     // ========== Debug Settings ==========

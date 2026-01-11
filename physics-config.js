@@ -7,7 +7,18 @@
 
 export const physicsConfig = {
     // ========== World Settings ==========
-    gravity: { x: 0, y: 0, z: 0 },  // Zero-G environment
+    gravity: { x: 0, y: 0, z: 0 },  // Zero-G environment (changed dynamically)
+    gravityBoots: { x: 0, y: -9.81, z: 0 },  // Gravity for walking mode
+    
+    // ========== Movement Mode ==========
+    // 'weightless' = zero-G with thruster
+    // 'gravityBoots' = FPS-style walking with gravity
+    movementMode: 'gravityBoots',
+    
+    // ========== Ghost Mode ==========
+    // true = pass through walls (no collision)
+    // false = solid collision with world geometry
+    ghostMode: true,
     
     // ========== Player Settings ==========
     player: {
@@ -45,6 +56,25 @@ export const physicsConfig = {
         // true = force applied every frame while key held
         // false = single impulse on key press
         continuous: false,
+    },
+    
+    // ========== Gravity Boots (Walking) Settings ==========
+    walking: {
+        speed: 4.0,              // Walk speed in m/s
+        runMultiplier: 2.0,      // Run speed multiplier (shift held)
+        jumpForce: 6.0,          // Jump impulse force (slightly higher for taller player)
+        groundCheckDistance: 0.6, // Distance to check for ground below player
+        stepHeight: 0.3,         // Max step height player can walk over
+        
+        // Capsule collision shape for FPS walking (tall standing player)
+        capsuleRadius: 0.25,     // Radius of capsule ends
+        capsuleHalfHeight: 0.9,  // Half the height of the cylinder part (total height ~2.3m)
+        collisionYOffset: -1.15, // Center capsule at player feet
+        
+        // Physics properties for walking (override player defaults)
+        linearDamping: 5.0,      // High damping for instant stop when releasing keys
+        restitution: 0.0,        // No bounce - FPS style
+        friction: 1.0,           // High friction for grip
     },
     
     // ========== Collision Mesh Settings ==========

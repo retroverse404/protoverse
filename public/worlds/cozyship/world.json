@@ -6,19 +6,111 @@
   "rotation": [0, -1.59, 0, 0],
   "portals": [
   ],
+
+  "_portals": [
+    {
+      "name": "Root",
+      "start": {
+        "position": [-8.60, 6.78, 27.81],
+        "rotation": [0, 0.7071067811865476, 0, -0.7071067811865476]
+      },
+      "destination": {
+        "url": "/root/world.json",
+        "position": [2.60, -1.23, 13.72],
+        "rotation": [0, 0.78, 0, -0.63]
+      }
+    }
+  ],
+  "_characters": [
+  ],
+
   "characters": [
     {
-      "name": "Amy",
-      "type": "amy",
-      "position": [-7.86, 5.34, 6.05],
+      "name": "Y-Bot",
+      "type": "ybot",
+      "position": [-7.86, 4.99, 6.05],
       "rotation": [0, 0, 0, 1],
       "scale": 0.015,
-      "waypoints": [
-        [0, 0, 0],
-        [2, 0, 0],
-        [2, 0, 2],
-        [0, 0, 2]
-      ]
+      "waypointGraph": [
+        { "id": "start", "pos": [-7.86, 4.99, 6.05], "edges": ["door", "bed"] },
+        { "id": "door", "pos": [-7.86, 4.99, 1.05], "edges": ["start", "hallway"] },
+        { "id": "hallway", "pos": [0.65, 4.99, -0.76], "edges": ["door", "utility" ] },
+        { "id": "utility", "pos": [0.28, 4.99, 14.04], "edges": ["hallway", "shelf", "utility-door"] },
+        { "id": "shelf", "pos": [4.12, 4.99, 19.96], "edges": ["utility", "utility-door"] },
+        { "id": "utility-door", "pos": [0.12, 4.99, 18.91], "edges": ["utility", "shelf", "central-hallway"] },
+        { "id": "central-hallway", "pos": [0.41, 4.99, 28.33], "edges": ["utility-door", "central-front", "central-back"] },
+        { "id": "central-back", "pos": [-11.25, 4.99, 27.69], "edges": ["central-hallway"] },
+        { "id": "central-front", "pos": [9.71, 4.99, 27.81], "edges": ["central-hallway", "kitchen-center", "cockpit"] },
+        { "id": "kitchen-center", "pos": [9.69, 4.99, 43.18], "edges": ["central-front"] },
+        { "id": "cockpit", "pos": [27.39, 4.99, 27.47], "edges": ["central-front"] },
+        { "id": "bed", "pos": [-12.91, 5.5, 3.98], "edges": ["start"], "isCinemaSpot": true }
+      ],
+      "cinemaCommentarySlug": "ybot-movie-frame-a6c8",
+      "commentary": {
+        "enabled": true,
+        "intervalMinSec": 60,
+        "intervalMaxSec": 300,
+        "botPrompt": "You are Y-Bot, a friendly robot companion watching a movie with the user. Share brief, enthusiastic commentary about what's happening on screen. Be fun and conversational, like a friend watching together. Keep responses to 1-2 sentences."
+      }
+    }
+  ],
+  "audioSources": [
+  ],
+  "_audioSources": [
+    {
+      "name": "Machine Room",
+      "url": "/cozyship/audio/machine-room.mp3",
+      "position": [26.12, 7.30, 27.75],
+      "refDistance": 5,
+      "rolloffFactor": 5,
+      "maxDistance": 20,
+      "loop": true,
+      "volume": 0.4
+    },
+    {
+      "name": "Happy Relaxing Loop",
+      "url": "/cozyship/audio/happy-relaxing-loop.mp3",
+      "position": [-13.96, 6.82, 4.55],
+      "refDistance": 5,
+      "rolloffFactor": 10,
+      "maxDistance": 10,
+      "loop": true,
+      "volume": 0.8
+    },
+    {
+      "name": "Spaceship Hum",
+      "url": "/cozyship/audio/spaceship-hum.mp3",
+      "position": [-0.07, 7.80, -13.22],
+      "refDistance": 5,
+      "rolloffFactor": 10,
+      "maxDistance": 10,
+      "loop": true,
+      "volume": 0.4
+    }
+  ],
+  "foundryDisplays": [
+    {
+      "name": "Screen Share",
+      "wsUrl": "ws://localhost:23646/ws",
+      "position": [-14.33, 7.0, -0.06],
+      "rotation": [0, 0, 0, 1],
+      "width": 7.3,
+      "aspectRatio": 1.85,
+      "movie": {
+        "title": "Star Wars the Phantom Menace",
+        "description": "The Phantom Menace is the first film in the Star Wars saga. It is a prequel to the original trilogy and follows the story of Anakin Skywalker, a young Jedi Knight who is trained by Obi-Wan Kenobi and Qui-Gon Jinn."
+      },
+      "vrCommentaryPanel": {
+        "offsetY": 2.2,
+        "offsetZ": 0,
+        "width": 7.3,
+        "height": 1.2
+      },
+      "vrPlaybackButton": {
+        "offsetX": -3.5,
+        "offsetY": -1.7,
+        "offsetZ": 0.3
+      }
     }
   ]
 }

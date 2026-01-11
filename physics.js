@@ -28,6 +28,15 @@ let debugSphereVisible = false;
 // Collision bodies for world geometry
 const collisionBodies = [];
 
+// Movement mode: 'weightless' or 'gravityBoots'
+let movementMode = 'gravityBoots';  // Default to FPS walking
+
+// Ghost mode: true = pass through walls, false = solid collision
+let ghostMode = true;  // Default to ghost mode (no collisions)
+
+// Ground check state for walking
+let isGrounded = false;
+
 // Input state for thruster (keyboard)
 const thrusterInput = {
     forward: false,   // W or ArrowUp
@@ -56,7 +65,7 @@ let thrustStopTimeout = null;
 let thrustFadeInterval = null;
 const THRUST_MIN_DURATION = 1000; // Minimum play time in ms
 const THRUST_FADE_DURATION = 500; // Fade out duration in ms
-const THRUST_VOLUME = 0.5;        // Normal playing volume
+const THRUST_VOLUME = 0.15;        // Normal playing volume
 
 /**
  * Initialize thrust sound effect
@@ -75,6 +84,9 @@ function initThrustSound() {
  */
 async function startThrustSound() {
     if (!thrustAudio || !isEnabled) return;
+    
+    // Don't play thrust sound in gravity boots mode (FPS walking)
+    if (movementMode === 'gravityBoots') return;
     
     // Cancel any pending stop or fade
     if (thrustStopTimeout) {
@@ -217,7 +229,8 @@ export async function initPhysics() {
 }
 
 /**
- * Create the player physics body (sphere)
+ * Create the player physics body
+ * Uses capsule for gravity boots (FPS walking) or sphere for weightless (thruster)
  * @param {THREE.Group} localFrame - The player's local frame (camera parent)
  * @param {THREE.Camera} camera - The camera for direction reference
  * @param {THREE.Scene} scene - The scene to add debug visualization to
@@ -234,41 +247,144 @@ export function createPlayerBody(localFrame, camera, scene, renderer = null) {
     sceneRef = scene;
     rendererRef = renderer;
     
-    const config = physicsConfig.player;
     const pos = localFrame.position;
-    const yOffset = config.collisionYOffset || 0;
     
-    // Create dynamic rigid body (offset vertically for VR chest-level collision)
+    // Get Y offset based on current mode
+    const yOffset = getCollisionYOffset();
+    
+    // Create dynamic rigid body
     const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(pos.x, pos.y + yOffset, pos.z)
-        .setLinearDamping(config.linearDamping)
-        .setAngularDamping(config.angularDamping)
+        .setLinearDamping(physicsConfig.player.linearDamping)
+        .setAngularDamping(physicsConfig.player.angularDamping)
         .setCcdEnabled(true) // Continuous collision detection for fast movement
         .setCanSleep(false); // Prevent abrupt stop from sleep threshold
     
     playerBody = world.createRigidBody(bodyDesc);
     
-    // Create sphere collider
-    const colliderDesc = RAPIER.ColliderDesc.ball(config.radius)
-        .setRestitution(config.restitution)
-        .setFriction(config.friction)
-        .setMass(config.mass);
+    // Create collider based on current movement mode
+    createPlayerCollider();
+    
+    // Create debug mesh (will be updated based on mode)
+    createDebugMesh();
+    
+    // Apply initial mode settings
+    applyModePhysics(movementMode);
+    
+    // Set initial gravity based on mode (default is gravityBoots with gravity ON)
+    updateGravity();
+    
+    console.log("✓ Player physics body created, mode:", movementMode, "ghostMode:", ghostMode);
+}
+
+/**
+ * Get the Y offset for collision based on current mode
+ */
+function getCollisionYOffset() {
+    if (movementMode === 'gravityBoots') {
+        return physicsConfig.walking?.collisionYOffset ?? -0.85;
+    }
+    return physicsConfig.player.collisionYOffset || 0;
+}
+
+/**
+ * Create the player collider based on current movement mode
+ */
+function createPlayerCollider() {
+    if (!world || !playerBody) return;
+    
+    // Remove existing collider if any
+    if (playerCollider) {
+        world.removeCollider(playerCollider, true);
+        playerCollider = null;
+    }
+    
+    let colliderDesc;
+    
+    if (movementMode === 'gravityBoots') {
+        // Capsule for FPS walking (taller, standing upright)
+        const walkConfig = physicsConfig.walking || {};
+        const radius = walkConfig.capsuleRadius ?? 0.25;
+        const halfHeight = walkConfig.capsuleHalfHeight ?? 0.6;
+        
+        colliderDesc = RAPIER.ColliderDesc.capsule(halfHeight, radius)
+            .setRestitution(walkConfig.restitution ?? 0.0)
+            .setFriction(walkConfig.friction ?? 1.0)
+            .setMass(physicsConfig.player.mass);
+        
+        console.log(`[Physics] Created capsule collider: radius=${radius}, halfHeight=${halfHeight}`);
+    } else {
+        // Sphere for weightless/thruster mode
+        const config = physicsConfig.player;
+        
+        colliderDesc = RAPIER.ColliderDesc.ball(config.radius)
+            .setRestitution(config.restitution)
+            .setFriction(config.friction)
+            .setMass(config.mass);
+        
+        console.log(`[Physics] Created sphere collider: radius=${config.radius}`);
+    }
     
     playerCollider = world.createCollider(colliderDesc, playerBody);
+}
+
+/**
+ * Create/update debug mesh to match current collider shape
+ */
+function createDebugMesh() {
+    // Remove existing debug mesh
+    if (debugSphere && sceneRef) {
+        sceneRef.remove(debugSphere);
+        debugSphere.geometry.dispose();
+        debugSphere.material.dispose();
+        debugSphere = null;
+    }
     
-    // Create debug wireframe sphere for visualization
-    const debugGeometry = new THREE.SphereGeometry(config.radius, 16, 16);
+    if (!sceneRef) return;
+    
+    let debugGeometry;
+    
+    if (movementMode === 'gravityBoots') {
+        // Capsule geometry for walking mode
+        const walkConfig = physicsConfig.walking || {};
+        const radius = walkConfig.capsuleRadius ?? 0.25;
+        const halfHeight = walkConfig.capsuleHalfHeight ?? 0.6;
+        // CapsuleGeometry(radius, length, capSegments, radialSegments)
+        debugGeometry = new THREE.CapsuleGeometry(radius, halfHeight * 2, 8, 16);
+    } else {
+        // Sphere geometry for weightless mode
+        debugGeometry = new THREE.SphereGeometry(physicsConfig.player.radius, 16, 16);
+    }
+    
     const debugMaterial = new THREE.MeshBasicMaterial({
-        color: 0xff00ff, // Magenta for visibility
+        color: movementMode === 'gravityBoots' ? 0x00ff00 : 0xff00ff, // Green for capsule, magenta for sphere
         wireframe: true,
         transparent: true,
         opacity: 0.7
     });
+    
     debugSphere = new THREE.Mesh(debugGeometry, debugMaterial);
     debugSphere.visible = debugSphereVisible;
-    scene.add(debugSphere);
+    sceneRef.add(debugSphere);
+}
+
+/**
+ * Apply physics properties for a given mode
+ */
+function applyModePhysics(mode) {
+    if (!playerBody || !playerCollider) return;
     
-    console.log("✓ Player physics body created (sphere, radius:", config.radius, ")");
+    if (mode === 'gravityBoots') {
+        const walkConfig = physicsConfig.walking || {};
+        playerBody.setLinearDamping(walkConfig.linearDamping ?? 5.0);
+        playerCollider.setRestitution(walkConfig.restitution ?? 0.0);
+        playerCollider.setFriction(walkConfig.friction ?? 1.0);
+    } else {
+        const playerConfig = physicsConfig.player;
+        playerBody.setLinearDamping(playerConfig.linearDamping);
+        playerCollider.setRestitution(playerConfig.restitution);
+        playerCollider.setFriction(playerConfig.friction);
+    }
 }
 
 /**
@@ -445,15 +561,21 @@ export function isPhysicsInitialized() {
     return isInitialized;
 }
 
+// Track if chat input is focused (disable movement when typing)
+let chatInputFocused = false;
+
 /**
  * Setup keyboard input listeners for thruster control
  */
 export function setupThrusterInput() {
     document.addEventListener("keydown", (e) => {
+        // Ignore keyboard input when chat is focused
+        if (chatInputFocused) return;
         updateThrusterKey(e.code, true);
     });
     
     document.addEventListener("keyup", (e) => {
+        // Always process keyup to avoid stuck keys
         updateThrusterKey(e.code, false);
     });
     
@@ -461,6 +583,16 @@ export function setupThrusterInput() {
     window.addEventListener("blur", () => {
         Object.keys(thrusterInput).forEach(key => thrusterInput[key] = false);
         forceStopThrustSound();  // Immediate stop on blur
+    });
+    
+    // Listen for chat focus events
+    window.addEventListener("chat-focus", (e) => {
+        chatInputFocused = e.detail?.focused || false;
+        if (chatInputFocused) {
+            // Clear all inputs when chat is focused
+            Object.keys(thrusterInput).forEach(key => thrusterInput[key] = false);
+            forceStopThrustSound();
+        }
     });
     
     console.log("✓ Thruster input listeners set up");
@@ -660,8 +792,16 @@ function clampVelocity() {
 export function updatePhysics(deltaTime) {
     if (!isInitialized || !world || !isEnabled) return;
     
-    // Apply thruster forces
-    applyThrusterForces();
+    // Apply movement based on mode
+    if (movementMode === 'gravityBoots') {
+        // Check if grounded
+        checkGrounded();
+        // Apply walking movement
+        applyWalkingMovement();
+    } else {
+        // Apply thruster forces (weightless mode)
+        applyThrusterForces();
+    }
     
     // Step the physics simulation
     world.step();
@@ -669,10 +809,10 @@ export function updatePhysics(deltaTime) {
     // Clamp velocity
     clampVelocity();
     
-    // Sync localFrame position with physics body (subtract Y offset)
+    // Sync localFrame position with physics body (subtract Y offset based on mode)
     if (playerBody && localFrameRef) {
         const pos = playerBody.translation();
-        const yOffset = physicsConfig.player.collisionYOffset || 0;
+        const yOffset = getCollisionYOffset();
         localFrameRef.position.set(pos.x, pos.y - yOffset, pos.z);
         
         // Update debug sphere position
@@ -683,6 +823,110 @@ export function updatePhysics(deltaTime) {
         // Optionally sync rotation (uncomment if you want physics to control rotation)
         // const rot = playerBody.rotation();
         // localFrameRef.quaternion.set(rot.x, rot.y, rot.z, rot.w);
+    }
+}
+
+/**
+ * Check if player is on the ground (for gravity boots mode)
+ */
+function checkGrounded() {
+    if (!world || !playerBody) {
+        isGrounded = false;
+        return;
+    }
+    
+    const pos = playerBody.translation();
+    const checkDist = physicsConfig.walking?.groundCheckDistance || 0.3;
+    
+    // Cast a ray downward from the player
+    const rayOrigin = new RAPIER.Vector3(pos.x, pos.y, pos.z);
+    const rayDir = new RAPIER.Vector3(0, -1, 0);
+    
+    const ray = new RAPIER.Ray(rayOrigin, rayDir);
+    const hit = world.castRay(ray, checkDist + physicsConfig.player.radius, true, null, null, playerCollider);
+    
+    isGrounded = hit !== null;
+}
+
+/**
+ * Apply walking movement (for gravity boots mode)
+ */
+function applyWalkingMovement() {
+    if (!playerBody || !localFrameRef) return;
+    
+    // Update VR controller input
+    updateVrThrusterInput();
+    
+    const config = physicsConfig.walking || {};
+    let speed = config.speed || 4.0;
+    
+    // Apply run multiplier
+    if (thrusterInput.boost || vrThrusterInput.boost) {
+        speed *= config.runMultiplier || 2.0;
+    }
+    
+    // Calculate movement direction based on localFrame orientation
+    const moveDir = new THREE.Vector3();
+    
+    // Get localFrame forward direction (negative Z in local space)
+    const forward = new THREE.Vector3(0, 0, -1);
+    forward.applyQuaternion(localFrameRef.quaternion);
+    forward.y = 0; // Project onto horizontal plane
+    forward.normalize();
+    
+    // Get localFrame right vector (positive X in local space)
+    const right = new THREE.Vector3(1, 0, 0);
+    right.applyQuaternion(localFrameRef.quaternion);
+    right.y = 0; // Project onto horizontal plane
+    right.normalize();
+    
+    // Accumulate movement direction from keyboard
+    if (thrusterInput.forward) moveDir.add(forward);
+    if (thrusterInput.backward) moveDir.sub(forward);
+    if (thrusterInput.right) moveDir.add(right);
+    if (thrusterInput.left) moveDir.sub(right);
+    
+    // Add VR controller input
+    if (Math.abs(vrThrusterInput.z) > 0.1) {
+        moveDir.addScaledVector(forward, -vrThrusterInput.z);
+    }
+    if (Math.abs(vrThrusterInput.x) > 0.1) {
+        moveDir.addScaledVector(right, vrThrusterInput.x);
+    }
+    
+    // Normalize and apply speed
+    if (moveDir.lengthSq() > 0) {
+        moveDir.normalize();
+        moveDir.multiplyScalar(speed);
+    }
+    
+    // Handle vertical movement
+    let verticalVel = 0;
+    
+    if (ghostMode) {
+        // Ghost mode: allow flying up/down with R/Space and F/Ctrl
+        if (thrusterInput.up) verticalVel = speed;
+        if (thrusterInput.down) verticalVel = -speed;
+        if (Math.abs(vrThrusterInput.y) > 0.1) {
+            verticalVel = vrThrusterInput.y * speed;
+        }
+        
+        playerBody.setLinvel(
+            new RAPIER.Vector3(moveDir.x, verticalVel, moveDir.z),
+            true
+        );
+    } else {
+        // Normal walking: preserve vertical velocity (for gravity/jumping)
+        const currentVel = playerBody.linvel();
+        playerBody.setLinvel(
+            new RAPIER.Vector3(moveDir.x, currentVel.y, moveDir.z),
+            true
+        );
+        
+        // Handle jump (Space or R key, or VR up input)
+        if (isGrounded && (thrusterInput.up || vrThrusterInput.y > 0.5)) {
+            jump();
+        }
     }
 }
 
@@ -702,6 +946,16 @@ export function getPlayerVelocity() {
 }
 
 /**
+ * Stop player movement (set velocity to zero)
+ * Useful for stopping momentum when entering conversations, menus, etc.
+ */
+export function stopPlayerMovement() {
+    if (!playerBody) return;
+    playerBody.setLinvel(new RAPIER.Vector3(0, 0, 0), true);
+    playerBody.setAngvel(new RAPIER.Vector3(0, 0, 0), true);
+}
+
+/**
  * Get the Rapier world instance (for debugging)
  * @returns {RAPIER.World|null}
  */
@@ -709,3 +963,163 @@ export function getPhysicsWorld() {
     return world;
 }
 
+// ========== Movement Mode Functions ==========
+
+/**
+ * Update gravity based on current movement mode and ghost mode
+ * Gravity is only active when: gravityBoots mode AND ghost mode OFF
+ */
+function updateGravity() {
+    if (!world) return;
+    
+    // Gravity only when: gravity boots AND not ghost mode
+    const shouldHaveGravity = movementMode === 'gravityBoots' && !ghostMode;
+    
+    if (shouldHaveGravity) {
+        const g = physicsConfig.gravityBoots;
+        world.gravity = new RAPIER.Vector3(g.x, g.y, g.z);
+        console.log(`[Physics] Gravity ON: (${g.x}, ${g.y}, ${g.z})`);
+    } else {
+        world.gravity = new RAPIER.Vector3(0, 0, 0);
+        console.log(`[Physics] Gravity OFF (zero-G)`);
+    }
+}
+
+/**
+ * Set movement mode
+ * @param {'weightless' | 'gravityBoots'} mode
+ */
+export function setMovementMode(mode) {
+    if (mode !== 'weightless' && mode !== 'gravityBoots') {
+        console.warn(`Invalid movement mode: ${mode}`);
+        return;
+    }
+    
+    const previousMode = movementMode;
+    movementMode = mode;
+    physicsConfig.movementMode = mode;
+    
+    // Update gravity based on mode and ghost state
+    updateGravity();
+    
+    // Stop thrust sound when entering walking mode
+    if (mode === 'gravityBoots') {
+        stopThrustSound();
+    }
+    
+    // Recreate collider with new shape if mode changed
+    if (playerBody && previousMode !== mode) {
+        // Store current position before recreating
+        const currentPos = playerBody.translation();
+        const currentVel = playerBody.linvel();
+        
+        // Create new collider (capsule or sphere)
+        createPlayerCollider();
+        
+        // Update debug mesh to match new collider
+        createDebugMesh();
+        
+        // Apply physics properties for new mode
+        applyModePhysics(mode);
+        
+        // Adjust Y position for new collider offset
+        const newYOffset = getCollisionYOffset();
+        const oldYOffset = mode === 'gravityBoots' 
+            ? (physicsConfig.player.collisionYOffset || 0)
+            : (physicsConfig.walking?.collisionYOffset ?? -0.85);
+        const yAdjust = newYOffset - oldYOffset;
+        
+        playerBody.setTranslation(
+            new RAPIER.Vector3(currentPos.x, currentPos.y + yAdjust, currentPos.z),
+            true
+        );
+        
+        console.log(`[Physics] Switched collider shape for ${mode} mode`);
+    }
+    
+    // Stop current momentum when switching modes
+    stopPlayerMovement();
+}
+
+/**
+ * Get current movement mode
+ * @returns {'weightless' | 'gravityBoots'}
+ */
+export function getMovementMode() {
+    return movementMode;
+}
+
+/**
+ * Toggle movement mode between weightless and gravityBoots
+ * @returns {'weightless' | 'gravityBoots'} New mode
+ */
+export function toggleMovementMode() {
+    const newMode = movementMode === 'weightless' ? 'gravityBoots' : 'weightless';
+    setMovementMode(newMode);
+    return newMode;
+}
+
+// ========== Ghost Mode Functions ==========
+
+/**
+ * Set ghost mode
+ * @param {boolean} enabled - true = pass through walls, false = solid collision
+ */
+export function setGhostMode(enabled) {
+    ghostMode = enabled;
+    physicsConfig.ghostMode = enabled;
+    
+    // Update collision groups for player
+    if (playerCollider) {
+        if (enabled) {
+            // Ghost mode: player doesn't collide with anything
+            playerCollider.setCollisionGroups(0x00010000); // Group 1, collides with nothing
+        } else {
+            // Solid mode: player collides with world geometry
+            playerCollider.setCollisionGroups(0x00010002); // Group 1, collides with group 2
+        }
+    }
+    
+    // Update gravity (ghost mode disables gravity)
+    updateGravity();
+    
+    console.log(`[Physics] Ghost mode: ${enabled ? 'ON (no gravity, pass through walls)' : 'OFF (solid)'}`);
+}
+
+/**
+ * Get ghost mode state
+ * @returns {boolean}
+ */
+export function getGhostMode() {
+    return ghostMode;
+}
+
+/**
+ * Toggle ghost mode
+ * @returns {boolean} New ghost mode state
+ */
+export function toggleGhostMode() {
+    setGhostMode(!ghostMode);
+    return ghostMode;
+}
+
+/**
+ * Check if player is grounded (for gravity boots mode)
+ * @returns {boolean}
+ */
+export function isPlayerGrounded() {
+    return isGrounded;
+}
+
+/**
+ * Perform a jump (only works in gravity boots mode when grounded)
+ */
+export function jump() {
+    if (movementMode !== 'gravityBoots' || !isGrounded || !playerBody) return;
+    
+    const jumpForce = physicsConfig.walking?.jumpForce || 5.0;
+    const vel = playerBody.linvel();
+    playerBody.setLinvel(new RAPIER.Vector3(vel.x, jumpForce, vel.z), true);
+    isGrounded = false;
+    console.log('[Physics] Jump!');
+}

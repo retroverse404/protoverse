@@ -8,13 +8,13 @@
 // Character definitions - assets are in public/worlds/<world>/characters/<character-name>/
 import { OldManCharacter } from './old-man.js';
 import { TimelessCharacter } from './timeless.js';
-import { AmyCharacter } from './amy.js';
+import { YBotCharacter } from './ybot.js';
 
 // Registry mapping character type IDs to their definitions
 export const characterRegistry = {
     "old-man": OldManCharacter,
     "timeless": TimelessCharacter,
-    "amy": AmyCharacter,
+    "ybot": YBotCharacter,
 };
 
 /**

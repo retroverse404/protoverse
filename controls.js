@@ -201,6 +201,7 @@ export function createAnimationLoop({
     updateMultiplayer,
     updatePhysics,
     updateCharacters,
+    updateFoundry,
     animatePortal = true
 }) {
     let lastTime = performance.now();
@@ -230,7 +231,7 @@ export function createAnimationLoop({
 
         // Update character animations
         if (updateCharacters) {
-            updateCharacters(deltaTime);
+            updateCharacters(deltaTime, time);
         }
 
         // Update HUD
@@ -243,6 +244,11 @@ export function createAnimationLoop({
         // Update multiplayer (send position, animate peer avatars)
         if (updateMultiplayer) {
             updateMultiplayer(time);
+        }
+
+        // Update Foundry displays (ambient glow animation)
+        if (updateFoundry) {
+            updateFoundry(time / 1000);  // Convert to seconds
         }
 
         // Update XR hands if active

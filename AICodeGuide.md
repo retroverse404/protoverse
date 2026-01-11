@@ -134,9 +134,72 @@ export const MyCharacter = {
   "position": [x, y, z],
   "rotation": [qx, qy, qz, qw],
   "scale": 0.01,
-  "customProperty": "available via instance.instanceData"
+  "waypointGraph": [
+    { "id": "start", "pos": [x,y,z], "edges": ["waypoint2"] },
+    { "id": "waypoint2", "pos": [x,y,z], "edges": ["start", "waypoint3"] }
+  ]
 }
 ```
+
+### 6. Waypoint Graph System
+
+Characters like Amy use a DAG (Directed Acyclic Graph) for natural wandering:
+
+```javascript
+// In world.json, define waypointGraph per character instance
+"waypointGraph": [
+  { "id": "start", "pos": [-7.86, 4.99, 6.05], "edges": ["door"] },
+  { "id": "door", "pos": [-7.86, 4.99, 1.05], "edges": ["start", "hallway"] },
+  ...
+]
+```
+
+**Behavior:**
+- At each node, pick random edge (excluding previous node to avoid backtracking)
+- 20% chance to pause at a node (1-5 seconds)
+- Never backtracks unless it's the only option
+- See `amy.js` for implementation: `buildWaypointGraph()`, `pickRandomNextNode()`
+
+### 7. Foundry Streaming
+
+Foundry is a custom Rust server for screen/audio streaming (replaces VNC).
+
+**Server**: `~/projects/foundry/` - Rust application using xcap + OpenH264
+**Client**: `foundry-share.js` + `public/foundry-worker.js`
+
+```json
+// world.json
+"foundryDisplays": [
+  {
+    "name": "Screen Share",
+    "wsUrl": "ws://localhost:23646/ws",
+    "position": [-13.33, 6.5, -0.06],
+    "width": 3.5,
+    "aspectRatio": 1.777
+  }
+]
+```
+
+See `docs/foundry-streaming.md` for full setup instructions.
+
+### 8. AI Chat System
+
+Characters can have AI-powered conversations using Braintrust.
+
+**Desktop**: `chat-ui.js` - 2D overlay chat window
+**VR**: `vr-chat.js` + `vr-keyboard.js` + `vr-chat-panel.js` - 3D keyboard/panel
+
+**Configuration:**
+- `config.js`: `ai.enabled`, `ai.projectName`
+- Character: `CHAT.promptSlug` for Braintrust prompt ID
+- Environment: `VITE_BRAINTRUST_API_KEY`
+
+**Flow:**
+1. Player approaches character → `onProximityEnter`
+2. `stopPlayerMovement()` halts player
+3. `showChat()` (desktop) or `startVRChat()` (VR)
+4. User types → `getChatResponse()` → Braintrust streaming
+5. Response appears via `startStreamingMessage()` / `appendToStreamingMessage()`
 
 ---
 
@@ -145,22 +208,34 @@ export const MyCharacter = {
 | File | Purpose |
 |------|---------|
 | `main.js` | Entry point, creates all managers, starts render loop |
-| `config.js` | Centralized configuration (world, VR, multiplayer, debug) |
+| `config.js` | Centralized configuration (world, VR, multiplayer, debug, AI) |
 | `scene.js` | `ProtoScene` class - Three.js scene/camera/renderer setup |
 | `proto.js` | `ProtoVerse` class - World loading, portals, DAG sync |
 | `verse-dag.js` | `VerseDag` - Graph of world connections |
 | `world-state.js` | `WorldState` - Per-world runtime state |
 | `character-manager.js` | `CharacterManager` - NPC spawning, animation, state machine |
 | `characters/index.js` | Character registry |
-| `physics.js` | Rapier physics integration |
+| `physics.js` | Rapier physics integration, `stopPlayerMovement()` |
 | `physics-config.js` | Physics parameters (thrust, bounce, drag) |
 | `controls.js` | Input handling (keyboard, mouse, VR controllers) |
 | `hud.js` | UI elements (FPS, buttons, orientation display) |
 | `loading.js` | Loading progress bar |
 | `audio.js` | Background audio management |
+| `spatial-audio.js` | Positional audio sources from world.json |
 | `coordinate-transform.js` | `worldToUniverse()` transform |
 | `port.js` | `ProtoPortal` class |
 | `sparkdisk.js` / `sparkring.js` | Portal visual effects |
+| **Streaming** | |
+| `foundry-share.js` | Foundry video/audio streaming client |
+| `public/foundry-worker.js` | WebCodecs H.264 decoder worker |
+| **AI Chat** | |
+| `chat-ui.js` | Desktop 2D chat interface |
+| `ai/chat-provider.js` | Chat response abstraction (AI or stock) |
+| `ai/bt.js` | Braintrust API integration |
+| **VR Chat** | |
+| `vr-chat.js` | VR chat system orchestrator |
+| `vr-keyboard.js` | 3D virtual keyboard for VR |
+| `vr-chat-panel.js` | 3D chat message display panel |
 
 ---
 
@@ -415,7 +490,14 @@ setConfig('debug.showFps', true);
 
 6. **Performance matters** - VR needs 72+ FPS. Avoid per-frame allocations and traversals.
 
-7. **Use existing patterns** - Look at `timeless.js` for walking characters, `old-man.js` for proximity reactions, `amy.js` for waypoint pathing.
+7. **Use existing patterns**:
+   - `timeless.js` - Walking characters with sounds
+   - `old-man.js` - Proximity reactions  
+   - `amy.js` - Waypoint graph pathing + AI chat integration
+
+8. **VR coordinate spaces** - WebXR poses are in XR reference space. Transform to world space via `localFrame.matrixWorld` before using in Three.js. See `vr-chat.js` for examples.
+
+9. **AI is optional** - Chat features require Braintrust API key. Always check `config.ai.enabled` and fall back gracefully to stock phrases.
 
 ---
 

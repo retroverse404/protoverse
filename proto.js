@@ -9,6 +9,8 @@ import { updateDiskAnimation } from "./sparkdisk.js";
 import { onCollisionMeshToggle, getCollisionMeshVisible } from "./hud.js";
 import { addCollisionMesh, removeCollisionMesh, isPhysicsInitialized, syncPlayerToLocalFrame } from "./physics.js";
 import { showLoading, updateLoading, hideLoading, isLoadingVisible } from "./loading.js";
+import { loadWorldFoundryDisplays, unloadWorldFoundryDisplays } from "./foundry-share.js";
+import { loadWorldAudioSources, unloadWorldAudioSources } from "./spatial-audio.js";
 
 /**
  * Configuration options for ProtoVerse
@@ -412,6 +414,18 @@ export class ProtoVerse {
                         console.log("Showing preloaded characters for:", worldUrl);
                     }
                 }
+            }
+            
+            // Load Foundry displays for this world
+            if (worldData.foundryDisplays && worldData.foundryDisplays.length > 0) {
+                console.log(`Loading ${worldData.foundryDisplays.length} Foundry display(s) for:`, worldUrl);
+                loadWorldFoundryDisplays(worldUrl, worldData, worldno);
+            }
+            
+            // Load spatial audio sources for this world
+            if (worldData.audioSources && worldData.audioSources.length > 0) {
+                console.log(`Loading ${worldData.audioSources.length} audio source(s) for:`, worldUrl);
+                await loadWorldAudioSources(worldUrl, worldData, worldno);
             }
             
             loadedWorlds++;

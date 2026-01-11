@@ -84,6 +84,8 @@ export function createAudioToggleButton(onToggle) {
         if (audioToggleCallback) {
             audioToggleCallback(audioEnabled);
         }
+        // Notify all listeners
+        audioListeners.forEach(callback => callback(audioEnabled));
     });
     button.addEventListener("mouseenter", () => {
         button.style.background = "rgba(0, 0, 0, 0.9)";
@@ -124,6 +126,24 @@ export function getAudioEnabled() {
 export function setAudioEnabled(enabled) {
     audioEnabled = enabled;
     updateAudioToggleButton();
+}
+
+// Audio toggle listeners
+const audioListeners = new Set();
+
+/**
+ * Register a listener for audio toggle events
+ * @param {Function} callback - Called with (isEnabled: boolean)
+ */
+export function onAudioToggle(callback) {
+    audioListeners.add(callback);
+}
+
+/**
+ * Unregister an audio toggle listener
+ */
+export function offAudioToggle(callback) {
+    audioListeners.delete(callback);
 }
 
 // ========== Collision Mesh Toggle Functions ==========
@@ -222,22 +242,23 @@ export function offCollisionMeshToggle(callback) {
     collisionMeshListeners.delete(callback);
 }
 
-// ========== Physics Toggle ==========
-let physicsEnabled = false;
-let physicsToggleCallback = null;
-const physicsListeners = new Set();
+// ========== Movement Mode Toggle ==========
+// 'weightless' = zero-G with thrusters (original physics mode)
+// 'gravityBoots' = FPS walking with gravity
+let movementMode = 'gravityBoots';  // Default to FPS walking
+let movementModeToggleCallback = null;
+const movementModeListeners = new Set();
 
 /**
- * Create physics toggle button (below collision mesh toggle)
- * @param {Function} onToggle - Callback function called when physics is toggled
- * @param {boolean} initialState - Initial physics enabled state (default: false)
+ * Create movement mode toggle button (below collision mesh toggle)
+ * Toggles between Thrust (zero-G) and Gravity Boots (walking)
+ * @param {Function} onToggle - Callback function called when mode is toggled (receives new mode)
  */
-export function createPhysicsToggleButton(onToggle, initialState = false) {
-    physicsToggleCallback = onToggle;
-    physicsEnabled = initialState;
+export function createMovementModeToggleButton(onToggle) {
+    movementModeToggleCallback = onToggle;
     
     const button = document.createElement("button");
-    button.id = "physics-toggle";
+    button.id = "movement-mode-toggle";
     button.style.cssText = `
         position: fixed;
         top: 110px;
@@ -245,7 +266,7 @@ export function createPhysicsToggleButton(onToggle, initialState = false) {
         width: 40px;
         height: 40px;
         background: rgba(0, 0, 0, 0.7);
-        border: 2px solid rgba(255, 255, 255, 0.5);
+        border: 2px solid rgba(100, 200, 255, 0.5);
         border-radius: 50%;
         color: white;
         font-size: 18px;
@@ -257,68 +278,371 @@ export function createPhysicsToggleButton(onToggle, initialState = false) {
         transition: all 0.2s;
     `;
     button.addEventListener("click", () => {
-        physicsEnabled = !physicsEnabled;
-        console.log("Physics toggle clicked, new state:", physicsEnabled);
-        updatePhysicsToggleButton();
-        if (physicsToggleCallback) {
-            physicsToggleCallback(physicsEnabled);
+        movementMode = movementMode === 'weightless' ? 'gravityBoots' : 'weightless';
+        console.log("Movement mode toggle clicked, new mode:", movementMode);
+        updateMovementModeToggleButton();
+        if (movementModeToggleCallback) {
+            movementModeToggleCallback(movementMode);
         }
         // Notify all registered listeners
-        physicsListeners.forEach(cb => cb(physicsEnabled));
+        movementModeListeners.forEach(cb => cb(movementMode));
     });
     button.addEventListener("mouseenter", () => {
         button.style.background = "rgba(0, 0, 0, 0.9)";
-        button.style.borderColor = "rgba(255, 255, 255, 0.8)";
+        button.style.borderColor = "rgba(100, 200, 255, 0.8)";
     });
     button.addEventListener("mouseleave", () => {
         button.style.background = "rgba(0, 0, 0, 0.7)";
-        button.style.borderColor = "rgba(255, 255, 255, 0.5)";
+        button.style.borderColor = "rgba(100, 200, 255, 0.5)";
     });
     
-    updatePhysicsToggleButton(button);
+    updateMovementModeToggleButton(button);
     document.body.appendChild(button);
 }
 
 /**
- * Update the physics toggle button icon
+ * Update the movement mode toggle button icon
  */
-function updatePhysicsToggleButton(button = null) {
-    const btn = button || document.getElementById("physics-toggle");
+function updateMovementModeToggleButton(button = null) {
+    const btn = button || document.getElementById("movement-mode-toggle");
     if (!btn) return;
     
-    // 🚀 = physics on (thruster mode), ⚡ = physics off (free fly)
-    btn.textContent = physicsEnabled ? "🚀" : "⚡";
-    btn.title = physicsEnabled ? "Physics: ON (click to disable)" : "Physics: OFF (click to enable)";
+    if (movementMode === 'gravityBoots') {
+        btn.textContent = "🥾";
+        btn.title = "Gravity Boots (click for Thrust)";
+    } else {
+        btn.textContent = "🚀";
+        btn.title = "Thrust Mode (click for Gravity Boots)";
+    }
 }
 
 /**
- * Get current physics enabled state
+ * Get current movement mode
  */
+export function getMovementMode() {
+    return movementMode;
+}
+
+/**
+ * Set movement mode (updates button icon)
+ */
+export function setMovementModeUI(mode) {
+    movementMode = mode;
+    updateMovementModeToggleButton();
+}
+
+/**
+ * Register a listener for movement mode changes
+ * @param {Function} callback - Called with (mode: string)
+ */
+export function onMovementModeToggle(callback) {
+    movementModeListeners.add(callback);
+}
+
+/**
+ * Unregister a movement mode listener
+ */
+export function offMovementModeToggle(callback) {
+    movementModeListeners.delete(callback);
+}
+
+// ========== Ghost Mode Toggle ==========
+// Ghost mode = no gravity + no collisions (pass through everything)
+let ghostModeEnabled = true;
+let ghostModeToggleCallback = null;
+const ghostModeListeners = new Set();
+
+/**
+ * Create ghost mode toggle button (below movement mode toggle)
+ * Ghost mode disables gravity and collisions
+ * @param {Function} onToggle - Callback function called when ghost mode is toggled
+ */
+export function createGhostModeToggleButton(onToggle) {
+    ghostModeToggleCallback = onToggle;
+    
+    const button = document.createElement("button");
+    button.id = "ghost-mode-toggle";
+    button.style.cssText = `
+        position: fixed;
+        top: 160px;
+        left: 10px;
+        width: 40px;
+        height: 40px;
+        background: rgba(0, 0, 0, 0.7);
+        border: 2px solid rgba(200, 100, 255, 0.5);
+        border-radius: 50%;
+        color: white;
+        font-size: 18px;
+        cursor: pointer;
+        z-index: 1001;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    `;
+    button.addEventListener("click", () => {
+        ghostModeEnabled = !ghostModeEnabled;
+        console.log("Ghost mode toggle clicked, enabled:", ghostModeEnabled);
+        updateGhostModeToggleButton();
+        if (ghostModeToggleCallback) {
+            ghostModeToggleCallback(ghostModeEnabled);
+        }
+        // Notify all registered listeners
+        ghostModeListeners.forEach(cb => cb(ghostModeEnabled));
+    });
+    button.addEventListener("mouseenter", () => {
+        button.style.background = "rgba(0, 0, 0, 0.9)";
+        button.style.borderColor = "rgba(200, 100, 255, 0.8)";
+    });
+    button.addEventListener("mouseleave", () => {
+        button.style.background = "rgba(0, 0, 0, 0.7)";
+        button.style.borderColor = "rgba(200, 100, 255, 0.5)";
+    });
+    
+    updateGhostModeToggleButton(button);
+    document.body.appendChild(button);
+}
+
+/**
+ * Update the ghost mode toggle button icon
+ */
+function updateGhostModeToggleButton(button = null) {
+    const btn = button || document.getElementById("ghost-mode-toggle");
+    if (!btn) return;
+    
+    if (ghostModeEnabled) {
+        btn.textContent = "👻";
+        btn.title = "Ghost Mode ON (click to disable)";
+    } else {
+        btn.textContent = "🧱";
+        btn.title = "Ghost Mode OFF (click to enable)";
+    }
+}
+
+/**
+ * Get current ghost mode state
+ */
+export function getGhostModeEnabled() {
+    return ghostModeEnabled;
+}
+
+/**
+ * Set ghost mode (updates button icon)
+ */
+export function setGhostModeUI(enabled) {
+    ghostModeEnabled = enabled;
+    updateGhostModeToggleButton();
+}
+
+/**
+ * Register a listener for ghost mode changes
+ * @param {Function} callback - Called with (enabled: boolean)
+ */
+export function onGhostModeToggle(callback) {
+    ghostModeListeners.add(callback);
+}
+
+/**
+ * Unregister a ghost mode listener
+ */
+export function offGhostModeToggle(callback) {
+    ghostModeListeners.delete(callback);
+}
+
+// Legacy physics toggle support (maps to movement mode for backwards compatibility)
+export function createPhysicsToggleButton(onToggle, initialState = false) {
+    // Create movement mode toggle instead
+    createMovementModeToggleButton((mode) => {
+        // Convert mode to boolean for legacy callback
+        const enabled = mode === 'weightless';
+        if (onToggle) onToggle(enabled);
+    });
+    if (initialState) {
+        movementMode = 'weightless';
+        updateMovementModeToggleButton();
+    }
+}
+
 export function getPhysicsEnabled() {
-    return physicsEnabled;
+    return movementMode === 'weightless';
 }
 
-/**
- * Set physics enabled state (updates button icon)
- */
 export function setPhysicsEnabled(enabled) {
-    physicsEnabled = enabled;
-    updatePhysicsToggleButton();
+    movementMode = enabled ? 'weightless' : 'gravityBoots';
+    updateMovementModeToggleButton();
 }
 
-/**
- * Register a listener for physics toggle changes
- * @param {Function} callback - Called with (isEnabled: boolean)
- */
 export function onPhysicsToggle(callback) {
-    physicsListeners.add(callback);
+    movementModeListeners.add((mode) => callback(mode === 'weightless'));
+}
+
+export function offPhysicsToggle(callback) {
+    // Note: This won't work perfectly with wrapped callbacks
+    movementModeListeners.delete(callback);
+}
+
+// ========== Foundry Toggle ==========
+let foundryConnected = false;
+let foundryToggleCallback = null;
+
+/**
+ * Create Foundry toggle button (below ghost mode toggle)
+ * @param {Function} onToggle - Callback function called when Foundry is toggled
+ */
+export function createFoundryToggleButton(onToggle) {
+    foundryToggleCallback = onToggle;
+    
+    const button = document.createElement("button");
+    button.id = "foundry-toggle";
+    button.style.cssText = `
+        position: fixed;
+        top: 210px;
+        left: 10px;
+        width: 40px;
+        height: 40px;
+        background: rgba(0, 0, 0, 0.7);
+        border: 2px solid rgba(0, 255, 255, 0.5);
+        border-radius: 50%;
+        color: white;
+        font-size: 18px;
+        cursor: pointer;
+        z-index: 1001;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    `;
+    button.addEventListener("click", async () => {
+        if (foundryToggleCallback) {
+            const newState = await foundryToggleCallback();
+            foundryConnected = newState;
+            updateFoundryToggleButton();
+        }
+    });
+    button.addEventListener("mouseenter", () => {
+        button.style.background = "rgba(0, 0, 0, 0.9)";
+        button.style.borderColor = "rgba(0, 255, 255, 0.8)";
+    });
+    button.addEventListener("mouseleave", () => {
+        button.style.background = "rgba(0, 0, 0, 0.7)";
+        button.style.borderColor = "rgba(0, 255, 255, 0.5)";
+    });
+    
+    updateFoundryToggleButton(button);
+    document.body.appendChild(button);
 }
 
 /**
- * Unregister a physics toggle listener
+ * Update the Foundry toggle button icon
  */
-export function offPhysicsToggle(callback) {
-    physicsListeners.delete(callback);
+function updateFoundryToggleButton(button = null) {
+    const btn = button || document.getElementById("foundry-toggle");
+    if (!btn) return;
+    
+    // 📺 = screen share icon
+    btn.textContent = "📺";
+    btn.style.borderColor = foundryConnected ? "rgba(0, 255, 0, 0.8)" : "rgba(0, 255, 255, 0.5)";
+    btn.title = foundryConnected ? "Foundry: CONNECTED (click to disconnect)" : "Foundry: DISCONNECTED (click to connect)";
+}
+
+/**
+ * Set Foundry connected state (updates button icon)
+ */
+export function setFoundryConnected(connected) {
+    foundryConnected = connected;
+    updateFoundryToggleButton();
+}
+
+// ========== Cinema Mode Toggle ==========
+let cinemaModeActive = false;
+let cinemaModeToggleCallback = null;
+
+/**
+ * Create cinema mode toggle button (below Foundry toggle)
+ * @param {Function} onToggle - Callback function called when cinema mode is toggled
+ */
+export function createCinemaModeButton(onToggle) {
+    cinemaModeToggleCallback = onToggle;
+    
+    const button = document.createElement("button");
+    button.id = "cinema-toggle";
+    button.style.cssText = `
+        position: fixed;
+        top: 260px;
+        left: 10px;
+        width: 40px;
+        height: 40px;
+        background: rgba(0, 0, 0, 0.7);
+        border: 2px solid rgba(128, 0, 255, 0.5);
+        border-radius: 50%;
+        color: white;
+        font-size: 18px;
+        cursor: pointer;
+        z-index: 1001;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    `;
+    button.addEventListener("click", () => {
+        if (cinemaModeToggleCallback) {
+            const newState = cinemaModeToggleCallback();
+            cinemaModeActive = newState;
+            updateCinemaModeButton();
+        }
+    });
+    button.addEventListener("mouseenter", () => {
+        button.style.background = "rgba(0, 0, 0, 0.9)";
+        button.style.borderColor = "rgba(128, 0, 255, 0.8)";
+    });
+    button.addEventListener("mouseleave", () => {
+        button.style.background = "rgba(0, 0, 0, 0.7)";
+        button.style.borderColor = cinemaModeActive ? "rgba(128, 0, 255, 0.8)" : "rgba(128, 0, 255, 0.5)";
+    });
+    
+    updateCinemaModeButton(button);
+    document.body.appendChild(button);
+}
+
+/**
+ * Update the cinema mode toggle button icon
+ */
+function updateCinemaModeButton(button = null) {
+    const btn = button || document.getElementById("cinema-toggle");
+    if (!btn) return;
+    
+    // 🎬 = cinema mode
+    btn.textContent = "🎬";
+    btn.style.borderColor = cinemaModeActive ? "rgba(128, 0, 255, 0.8)" : "rgba(128, 0, 255, 0.5)";
+    btn.title = cinemaModeActive ? "Cinema Mode: ON (click to disable)" : "Cinema Mode: OFF (click to enable)";
+}
+
+/**
+ * Set cinema mode state (updates button icon)
+ */
+export function setCinemaModeActive(active) {
+    cinemaModeActive = active;
+    updateCinemaModeButton();
+}
+
+/**
+ * Show/hide Foundry toggle button (for host-only controls)
+ */
+export function setFoundryButtonVisible(visible) {
+    const btn = document.getElementById("foundry-toggle");
+    if (btn) {
+        btn.style.display = visible ? "flex" : "none";
+    }
+}
+
+/**
+ * Show/hide Cinema mode toggle button (for host-only controls)
+ */
+export function setCinemaButtonVisible(visible) {
+    const btn = document.getElementById("cinema-toggle");
+    if (btn) {
+        btn.style.display = visible ? "flex" : "none";
+    }
 }
 
 const worldPos = new THREE.Vector3();

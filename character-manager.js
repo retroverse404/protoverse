@@ -59,6 +59,18 @@ export class CharacterManager {
         
         // Lighting for characters (added once)
         this._hasLighting = false;
+        
+        // Puppet mode: skip AI logic, just animate (for multiplayer viewers)
+        this.puppetMode = false;
+    }
+    
+    /**
+     * Set puppet mode (skip AI logic, only animate)
+     * @param {boolean} enabled
+     */
+    setPuppetMode(enabled) {
+        this.puppetMode = enabled;
+        console.log(`[CharacterManager] Puppet mode: ${enabled}`);
     }
     
     /**
@@ -259,6 +271,11 @@ export class CharacterManager {
                 action.setLoop(THREE.LoopRepeat);
             }
             
+            // Apply timeScale if specified
+            if (animDef.timeScale !== undefined) {
+                action.timeScale = animDef.timeScale;
+            }
+            
             instance.animations.set(startAnimation, { clip, action });
         }
         
@@ -283,6 +300,11 @@ export class CharacterManager {
                             action.clampWhenFinished = true;
                         } else {
                             action.setLoop(THREE.LoopRepeat);
+                        }
+                        
+                        // Apply timeScale if specified
+                        if (otherAnimDef.timeScale !== undefined) {
+                            action.timeScale = otherAnimDef.timeScale;
                         }
                         
                         instance.animations.set(animName, { clip, action });
@@ -465,6 +487,11 @@ export class CharacterManager {
                     action.setLoop(THREE.LoopRepeat);
                 }
                 
+                // Apply timeScale if specified
+                if (animDef.timeScale !== undefined) {
+                    action.timeScale = animDef.timeScale;
+                }
+                
                 instance.animations.set(animName, { clip, action });
             }
         }
@@ -476,7 +503,9 @@ export class CharacterManager {
             console.log(`[CharacterManager] Loop: ${animDef.loop !== false}`);
             // Ensure action is enabled and has proper weight
             newAnimData.action.enabled = true;
-            newAnimData.action.setEffectiveTimeScale(1);
+            // Use animation's timeScale if defined, otherwise default to 1
+            const timeScale = animDef.timeScale !== undefined ? animDef.timeScale : 1;
+            newAnimData.action.setEffectiveTimeScale(timeScale);
             newAnimData.action.setEffectiveWeight(1);
             newAnimData.action.reset();
             newAnimData.action.fadeIn(0.3);
@@ -570,6 +599,14 @@ export class CharacterManager {
                 // Skip if not visible
                 if (!instance.visible || !instance.model) continue;
                 
+                // Update animation mixer (always, even in puppet mode)
+                if (instance.mixer) {
+                    instance.mixer.update(deltaTime);
+                }
+                
+                // Skip AI logic in puppet mode (position/state controlled externally)
+                if (this.puppetMode) continue;
+                
                 // Calculate distance to player
                 const charPos = instance.model.position;
                 const playerDistance = playerPosition.distanceTo(charPos);
@@ -582,11 +619,6 @@ export class CharacterManager {
                     scene: this.scene,  // For raycasting against collision meshes
                     manager: this,      // Allow characters to trigger state transitions
                 };
-                
-                // Update animation mixer
-                if (instance.mixer) {
-                    instance.mixer.update(deltaTime);
-                }
                 
                 // Process state machine transitions
                 this._processStateMachine(instance, context);
