@@ -99,9 +99,14 @@ if (wsUrlParam) {
     console.log('[Config] Using WS URL from URL param:', wsUrlParam);
 }
 if (foundryUrlParam) {
-    console.log('[Config] Using Foundry URL from URL param:', foundryUrlParam);
+    // Ensure the foundry URL includes the /ws path
+    let foundryUrl = foundryUrlParam;
+    if (!foundryUrl.endsWith('/ws')) {
+        foundryUrl = foundryUrl.replace(/\/$/, '') + '/ws';
+    }
+    console.log('[Config] Using Foundry URL from URL param:', foundryUrl);
     // Store for later use when connecting to Foundry
-    window.FOUNDRY_URL_OVERRIDE = foundryUrlParam;
+    window.FOUNDRY_URL_OVERRIDE = foundryUrl;
 }
 
 const wsUrl = wsUrlParam || config.multiplayer.wsUrl || import.meta.env?.VITE_WS_URL || "ws://localhost:8080";

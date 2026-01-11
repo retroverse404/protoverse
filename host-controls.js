@@ -13,6 +13,7 @@ let isInitialized = false;
 let currentWorldUrl = null;
 let currentFoundryUrl = null;
 let unsubscribers = [];
+let isCollapsed = false; // Start expanded
 
 /**
  * Initialize host controls
@@ -118,11 +119,6 @@ function createControls() {
       }
       
       .hc-panel {
-        background: linear-gradient(135deg, rgba(30, 30, 40, 0.95) 0%, rgba(20, 20, 30, 0.95) 100%);
-        border: 1px solid rgba(100, 150, 255, 0.3);
-        border-radius: 8px;
-        padding: 12px;
-        backdrop-filter: blur(10px);
         min-width: 200px;
       }
       
@@ -278,72 +274,149 @@ function createControls() {
       .hc-hidden {
         display: none;
       }
+      
+      .hc-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        padding: 8px 12px;
+        background: linear-gradient(135deg, rgba(30, 30, 40, 0.95) 0%, rgba(20, 20, 30, 0.95) 100%);
+        border: 1px solid rgba(100, 150, 255, 0.3);
+        border-radius: 8px;
+        backdrop-filter: blur(10px);
+        min-width: 160px;
+        transition: border-radius 0.2s;
+      }
+      
+      .hc-header:hover {
+        background: linear-gradient(135deg, rgba(40, 40, 55, 0.95) 0%, rgba(30, 30, 40, 0.95) 100%);
+      }
+      
+      .hc-header.expanded {
+        border-radius: 8px 8px 0 0;
+        border-bottom: 1px solid rgba(100, 150, 255, 0.15);
+      }
+      
+      .hc-header-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #e0e0e0;
+        font-weight: 500;
+        font-size: 12px;
+      }
+      
+      .hc-header-icon {
+        font-size: 14px;
+      }
+      
+      .hc-toggle {
+        color: #888;
+        font-size: 10px;
+        transition: transform 0.2s;
+      }
+      
+      .hc-toggle.expanded {
+        transform: rotate(180deg);
+      }
+      
+      .hc-content {
+        display: none;
+        background: linear-gradient(135deg, rgba(30, 30, 40, 0.95) 0%, rgba(20, 20, 30, 0.95) 100%);
+        border: 1px solid rgba(100, 150, 255, 0.3);
+        border-top: none;
+        border-radius: 0 0 8px 8px;
+        backdrop-filter: blur(10px);
+      }
+      
+      .hc-content.expanded {
+        display: block;
+      }
+      
+      .hc-panel {
+        padding: 12px;
+        min-width: 200px;
+      }
+      
+      .hc-status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #666;
+      }
+      
+      .hc-status-dot.connected {
+        background: #22c55e;
+        box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+      }
+      
+      .hc-status-dot.hosting {
+        background: #3b82f6;
+        box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
+      }
     </style>
     
-    <div class="hc-panel" id="hc-panel-idle">
-      <div class="hc-title">
-        <span class="hc-title-icon">🎬</span>
-        <span>Multiplayer</span>
+    <div class="hc-header expanded" id="hc-header">
+      <div class="hc-header-title">
+        <span class="hc-header-icon" id="hc-header-icon">🎬</span>
+        <span id="hc-header-text">Create/Join</span>
+        <span class="hc-status-dot" id="hc-status-dot"></span>
       </div>
-      
-      <div class="hc-input-group">
-        <label class="hc-label">Your Name</label>
-        <input type="text" class="hc-input" id="hc-name-input" placeholder="Enter your name...">
-      </div>
-      
-      <button class="hc-btn hc-btn-primary" id="hc-create-btn">
-        Create Session
-      </button>
-      
-      <div class="hc-or">— or —</div>
-      
-      <div class="hc-input-group">
-        <label class="hc-label">Session Code</label>
-        <input type="text" class="hc-input" id="hc-join-code-input" placeholder="XXXXXX" maxlength="6" style="text-transform: uppercase; letter-spacing: 2px; text-align: center;">
-      </div>
-      
-      <button class="hc-btn hc-btn-secondary" id="hc-join-btn">
-        Join Session
-      </button>
+      <span class="hc-toggle expanded" id="hc-toggle">▼</span>
     </div>
     
-    <div class="hc-panel hc-hidden" id="hc-panel-hosting">
-      <div class="hc-title">
-        <span class="hc-title-icon">📡</span>
-        <span>Hosting Session</span>
-      </div>
-      
-      <div class="hc-session-active">
-        <div class="hc-session-code" id="hc-active-code"></div>
-        <div class="hc-session-url" id="hc-share-url"></div>
-        <button class="hc-copy-btn" id="hc-copy-url-btn">
-          📋 Copy Link
+    <div class="hc-content expanded" id="hc-content">
+      <div class="hc-panel" id="hc-panel-idle">
+        <div class="hc-input-group">
+          <label class="hc-label">Your Name</label>
+          <input type="text" class="hc-input" id="hc-name-input" placeholder="Enter your name...">
+        </div>
+        
+        <button class="hc-btn hc-btn-primary" id="hc-create-btn">
+          Create Session
+        </button>
+        
+        <div class="hc-or">— or —</div>
+        
+        <div class="hc-input-group">
+          <label class="hc-label">Session Code</label>
+          <input type="text" class="hc-input" id="hc-join-code-input" placeholder="XXXXXX" maxlength="6" style="text-transform: uppercase; letter-spacing: 2px; text-align: center;">
+        </div>
+        
+        <button class="hc-btn hc-btn-secondary" id="hc-join-btn">
+          Join Session
         </button>
       </div>
       
-      <div class="hc-divider"></div>
-      
-      <button class="hc-btn hc-btn-danger" id="hc-end-session-btn">
-        End Session
-      </button>
-    </div>
-    
-    <div class="hc-panel hc-hidden" id="hc-panel-viewing">
-      <div class="hc-title">
-        <span class="hc-title-icon">👁️</span>
-        <span>Viewing Session</span>
-      </div>
-      
-      <div class="hc-session-active">
-        <div class="hc-session-code" id="hc-viewing-code"></div>
-        <div style="color: #888; font-size: 11px; margin-bottom: 10px;">
-          Host: <span id="hc-host-name">-</span>
+      <div class="hc-panel hc-hidden" id="hc-panel-hosting">
+        <div class="hc-session-active">
+          <div class="hc-session-code" id="hc-active-code"></div>
+          <div class="hc-session-url" id="hc-share-url"></div>
+          <button class="hc-copy-btn" id="hc-copy-url-btn">
+            📋 Copy Link
+          </button>
         </div>
+        
+        <div class="hc-divider"></div>
+        
+        <button class="hc-btn hc-btn-danger" id="hc-end-session-btn">
+          End Session
+        </button>
       </div>
       
-      <button class="hc-btn hc-btn-danger" id="hc-leave-session-btn">
-        Leave Session
-      </button>
+      <div class="hc-panel hc-hidden" id="hc-panel-viewing">
+        <div class="hc-session-active">
+          <div class="hc-session-code" id="hc-viewing-code"></div>
+          <div style="color: #888; font-size: 11px; margin-bottom: 10px;">
+            Host: <span id="hc-host-name">-</span>
+          </div>
+        </div>
+        
+        <button class="hc-btn hc-btn-danger" id="hc-leave-session-btn">
+          Leave Session
+        </button>
+      </div>
     </div>
   `;
   
@@ -416,6 +489,9 @@ function createControls() {
       window.dispatchEvent(new CustomEvent('chat-focus', { detail: { focused: false } }));
     });
   }
+  
+  // Header toggle for collapse/expand
+  document.getElementById('hc-header').addEventListener('click', toggleCollapse);
 }
 
 /**
@@ -480,12 +556,61 @@ function joinSession(code) {
 }
 
 /**
+ * Toggle collapse state
+ */
+function toggleCollapse() {
+  isCollapsed = !isCollapsed;
+  const header = document.getElementById('hc-header');
+  const content = document.getElementById('hc-content');
+  const toggle = document.getElementById('hc-toggle');
+  
+  if (isCollapsed) {
+    header.classList.remove('expanded');
+    content.classList.remove('expanded');
+    toggle.classList.remove('expanded');
+  } else {
+    header.classList.add('expanded');
+    content.classList.add('expanded');
+    toggle.classList.add('expanded');
+  }
+}
+
+/**
+ * Expand the panel (for programmatic use)
+ */
+export function expandPanel() {
+  if (isCollapsed) {
+    isCollapsed = false;
+    document.getElementById('hc-header')?.classList.add('expanded');
+    document.getElementById('hc-content')?.classList.add('expanded');
+    document.getElementById('hc-toggle')?.classList.add('expanded');
+  }
+}
+
+/**
+ * Update header to reflect current state
+ */
+function updateHeader(icon, text, status = 'idle') {
+  document.getElementById('hc-header-icon').textContent = icon;
+  document.getElementById('hc-header-text').textContent = text;
+  
+  const dot = document.getElementById('hc-status-dot');
+  dot.classList.remove('connected', 'hosting');
+  if (status === 'hosting') {
+    dot.classList.add('hosting');
+  } else if (status === 'connected') {
+    dot.classList.add('connected');
+  }
+}
+
+/**
  * Show idle panel (no session)
  */
 function showIdlePanel() {
   document.getElementById('hc-panel-idle').classList.remove('hc-hidden');
   document.getElementById('hc-panel-hosting').classList.add('hc-hidden');
   document.getElementById('hc-panel-viewing').classList.add('hc-hidden');
+  updateHeader('🎬', 'Create/Join', 'idle');
 }
 
 /**
@@ -495,12 +620,33 @@ function showHostingPanel(code) {
   document.getElementById('hc-panel-idle').classList.add('hc-hidden');
   document.getElementById('hc-panel-hosting').classList.remove('hc-hidden');
   document.getElementById('hc-panel-viewing').classList.add('hc-hidden');
+  updateHeader('📡', `Hosting: ${code}`, 'hosting');
+  expandPanel(); // Auto-expand when session starts
   
   document.getElementById('hc-active-code').textContent = code;
   
-  // Generate share URL
+  // Generate share URL - preserve ws/foundry params for ngrok sharing
   const shareUrl = new URL(window.location.href);
   shareUrl.searchParams.set('session', code);
+  
+  // If we're on ngrok but missing ws/foundry params, add the default ngrok ones
+  const hostname = shareUrl.hostname;
+  if (hostname.endsWith('.ngrok.app') || hostname.endsWith('.ngrok-free.app')) {
+    // On ngrok - ensure ws and foundry params are set
+    if (!shareUrl.searchParams.has('ws')) {
+      // Try to infer from hostname pattern (protoverse.ngrok.app -> protoverse-wsserver.ngrok.app)
+      const baseName = hostname.split('.')[0]; // e.g., "protoverse"
+      const domain = hostname.split('.').slice(1).join('.'); // e.g., "ngrok.app"
+      shareUrl.searchParams.set('ws', `wss://${baseName}-wsserver.${domain}`);
+    }
+    if (!shareUrl.searchParams.has('foundry')) {
+      const baseName = hostname.split('.')[0];
+      const domain = hostname.split('.').slice(1).join('.');
+      // Include /ws path that foundry-player expects
+      shareUrl.searchParams.set('foundry', `wss://${baseName}-foundry.${domain}/ws`);
+    }
+  }
+  
   document.getElementById('hc-share-url').textContent = shareUrl.toString();
 }
 
@@ -511,6 +657,8 @@ function showViewingPanel(code, hostName) {
   document.getElementById('hc-panel-idle').classList.add('hc-hidden');
   document.getElementById('hc-panel-hosting').classList.add('hc-hidden');
   document.getElementById('hc-panel-viewing').classList.remove('hc-hidden');
+  updateHeader('👁️', `Viewing: ${code}`, 'connected');
+  expandPanel(); // Auto-expand when session starts
   
   document.getElementById('hc-viewing-code').textContent = code;
   document.getElementById('hc-host-name').textContent = hostName || '-';
