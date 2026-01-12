@@ -298,14 +298,31 @@ export function resetProximityTriggers(worldUrl) {
 function handleAudioToggle(enabled) {
     console.log(`[SpatialAudio] Audio toggle: ${enabled}`);
     
+    // Debug: Check AudioListener context state
+    if (audioListener) {
+        const ctx = audioListener.context;
+        console.log(`[SpatialAudio] AudioListener context state: ${ctx?.state}, sampleRate: ${ctx?.sampleRate}`);
+        
+        // Try to resume if suspended (iOS workaround)
+        if (ctx?.state === 'suspended') {
+            ctx.resume().then(() => {
+                console.log(`[SpatialAudio] Context resumed to: ${ctx.state}`);
+            }).catch(e => {
+                console.error(`[SpatialAudio] Failed to resume context:`, e);
+            });
+        }
+    }
+    
     for (const [worldUrl, sources] of worldAudioSources) {
         if (enabled) {
             // Start looping sources
             for (const source of sources) {
                 if (source.config.loop && !source.audio.isPlaying) {
                     try {
+                        // Debug: check if buffer is loaded
+                        console.log(`[SpatialAudio] Playing ${source.config.name}, buffer: ${source.audio.buffer ? 'loaded' : 'NULL'}, gain: ${source.audio.gain?.gain?.value}`);
                         source.audio.play();
-                        console.log(`[SpatialAudio] Started: ${source.config.name}`);
+                        console.log(`[SpatialAudio] Started: ${source.config.name}, isPlaying: ${source.audio.isPlaying}`);
                     } catch (error) {
                         console.warn(`[SpatialAudio] Failed to play ${source.config.name}:`, error);
                     }

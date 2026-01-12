@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { updateHUD, createAudioToggleButton, createCollisionMeshToggleButton, createMovementModeToggleButton, createGhostModeToggleButton, createFoundryToggleButton, createCinemaModeButton, initHud, getAudioEnabled, setFoundryButtonVisible, setCinemaButtonVisible } from "./hud.js";
-import { initAudio, playWorldAudio, handleAudioToggle, setCurrentWorldData, ensureAudioContext, getCurrentWorldData } from "./audio.js";
+import { initAudio, playWorldAudio, handleAudioToggle, setCurrentWorldData, ensureAudioContext, getCurrentWorldData, setupIOSAudioUnlock } from "./audio.js";
 import { initControls, createAnimationLoop } from "./controls.js";
 import { ProtoVerse } from "./proto.js";
 import { ProtoScene, loadWorldJSON } from "./scene.js";
@@ -37,6 +37,12 @@ import { initCharacterSync, setWorldUrl as setCharacterSyncWorld, updateCharacte
 // Import Foundry functions for viewer sync
 import { connectFoundry, disconnectFoundry, isFoundryConnected, getFoundryUrl } from "./foundry-share.js";
 
+// Mobile controls (virtual joystick)
+import { initMobileControls, isMobileDevice, setMobileControlsEnabled, getMobileInput } from "./mobile-controls.js";
+
+// Expose getMobileInput globally for physics.js to use (avoids circular import issues)
+window._getMobileInput = getMobileInput;
+
 // URL resolution
 const resolveUrl = createUrlResolver({ urlBase: config.urls.urlBase });
 
@@ -56,6 +62,9 @@ const localFrame = protoScene.getLocalFrame();
 // Create audio listener for positional audio (attached to localFrame, like sparkxrstart)
 const audioListener = new THREE.AudioListener();
 localFrame.add(audioListener);
+
+// Setup iOS audio unlock (must be after audioListener is created)
+setupIOSAudioUnlock(audioListener);
 
 // ========== Spatial Audio Setup ==========
 // Initialize spatial audio system for positional audio sources in worlds
@@ -260,6 +269,8 @@ const { controls, sparkXr } = initControls(renderer, camera, localFrame, {
         }
         // Set VR mode for character chat systems (chat disabled in VR)
         setVRMode(true);
+        // Hide mobile joystick in VR (not needed, VR has its own controllers)
+        try { setMobileControlsEnabled(false); } catch(e) { /* ignore */ }
         // Update cinema mode to use VR sphere instead of CSS overlay
         if (isCinemaModeActive()) {
             const currentWorldUrl = protoVerse.getCurrentWorldUrl() || rootworld;
@@ -270,6 +281,12 @@ const { controls, sparkXr } = initControls(renderer, camera, localFrame, {
     onExitXr: () => {
         // Re-enable chat systems when exiting VR
         setVRMode(false);
+        // Show mobile joystick again (if on mobile device)
+        try {
+            if (isMobileDevice()) {
+                setMobileControlsEnabled(true);
+            }
+        } catch(e) { /* ignore */ }
         // Update cinema mode to use CSS overlay instead of VR sphere
         if (isCinemaModeActive()) {
             const currentWorldUrl = protoVerse.getCurrentWorldUrl() || rootworld;
@@ -284,6 +301,16 @@ updateLoading(30, 'Initializing physics...');
 await initPhysics();
 createPlayerBody(localFrame, camera, protoScene.getScene(), renderer);
 setupThrusterInput();
+
+// Initialize mobile controls (virtual joystick) if on touch device and not in VR
+if (isMobileDevice()) {
+    initMobileControls();
+    // Hide initially if already in VR (unlikely but possible)
+    if (renderer.xr?.isPresenting) {
+        setMobileControlsEnabled(false);
+    }
+    console.log('[Main] Mobile controls initialized');
+}
 
 // Initialize ProtoVerse with root world (this will trigger onWorldChange callback)
 // NOTE: This must happen AFTER physics is initialized so collision meshes get registered

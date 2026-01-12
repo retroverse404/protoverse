@@ -19,8 +19,8 @@ const sessions = new Map();
 
 let nextClientId = 1;
 
-const wss = new WebSocketServer({ port: PORT });
-console.log(`WS server listening on :${PORT}`);
+const wss = new WebSocketServer({ host: '0.0.0.0', port: PORT });
+console.log(`WS server listening on 0.0.0.0:${PORT} (all interfaces)`);
 
 // Generate a random 6-character session code
 function generateSessionCode() {

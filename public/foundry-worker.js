@@ -103,13 +103,17 @@ function decodeChunk(buffer) {
     
     if (waitingForKey && chunkType !== "key") {
         droppedSinceConfig += 1;
-        if (droppedSinceConfig % 10 === 1) {
+        // Log less frequently after initial drops
+        if (droppedSinceConfig <= 5 || droppedSinceConfig % 20 === 0) {
             postMessage({
                 type: "log",
                 message: `dropping delta until keyframe (NAL type ${firstNalType ?? "unknown"}, dropped=${droppedSinceConfig})`,
             });
         }
-        if (droppedSinceConfig % 30 === 0) {
+        // Request keyframes more aggressively initially, then back off
+        // First 3 requests: every 5 frames, then every 15 frames
+        const requestInterval = droppedSinceConfig <= 15 ? 5 : 15;
+        if (droppedSinceConfig % requestInterval === 0) {
             postMessage({ type: "request-keyframe" });
         }
         return;

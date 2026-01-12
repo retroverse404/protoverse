@@ -9,6 +9,14 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import { physicsConfig } from "./physics-config.js";
 import { ensureAudioContext } from "./audio.js";
 
+// Mobile input - use globally exposed function to avoid import issues with VR
+const getMobileInput = () => {
+    if (typeof window !== 'undefined' && window._getMobileInput) {
+        return window._getMobileInput();
+    }
+    return { x: 0, y: 0, active: false };
+};
+
 // Module state
 let world = null;
 let playerBody = null;
@@ -744,6 +752,19 @@ function applyThrusterForces() {
         thrustDir.addScaledVector(up, vrThrusterInput.y);
     }
     
+    // Add mobile joystick input
+    const mobileInput = getMobileInput();
+    if (mobileInput.active) {
+        // Mobile joystick: x is left/right, y is forward/back (positive y = down = backward)
+        if (Math.abs(mobileInput.x) > 0) {
+            thrustDir.addScaledVector(right, mobileInput.x);
+        }
+        if (Math.abs(mobileInput.y) > 0) {
+            // Negative y = push up = forward
+            thrustDir.addScaledVector(forward, -mobileInput.y);
+        }
+    }
+    
     // Handle thrust sound for VR input
     if (hasVrInput && !isThrustSoundPlaying) {
         startThrustSound();
@@ -892,6 +913,18 @@ function applyWalkingMovement() {
     }
     if (Math.abs(vrThrusterInput.x) > 0.1) {
         moveDir.addScaledVector(right, vrThrusterInput.x);
+    }
+    
+    // Add mobile joystick input
+    const mobileInput = getMobileInput();
+    if (mobileInput.active) {
+        if (Math.abs(mobileInput.x) > 0) {
+            moveDir.addScaledVector(right, mobileInput.x);
+        }
+        if (Math.abs(mobileInput.y) > 0) {
+            // Negative y = push up = forward
+            moveDir.addScaledVector(forward, -mobileInput.y);
+        }
     }
     
     // Normalize and apply speed

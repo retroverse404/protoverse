@@ -72,6 +72,16 @@
     </div>
   </div>
   
+  <!-- Mobile console for debugging - enable with ?debug=1 in URL -->
+  <script>
+    if (new URLSearchParams(window.location.search).has('debug')) {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/eruda';
+      script.onload = () => eruda.init();
+      document.head.appendChild(script);
+    }
+  </script>
+  
   <script type="module" src="/main.js"></script>
 </body>
 

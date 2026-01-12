@@ -258,6 +258,22 @@ function createControls() {
         color: #22c55e;
       }
       
+      .hc-btn-row {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+      }
+      
+      .hc-quest-btn {
+        background: rgba(168, 85, 247, 0.2);
+        border-color: rgba(168, 85, 247, 0.3);
+        color: #c084fc;
+      }
+      
+      .hc-quest-btn:hover {
+        background: rgba(168, 85, 247, 0.3);
+      }
+      
       .hc-divider {
         height: 1px;
         background: rgba(100, 150, 255, 0.15);
@@ -393,9 +409,14 @@ function createControls() {
         <div class="hc-session-active">
           <div class="hc-session-code" id="hc-active-code"></div>
           <div class="hc-session-url" id="hc-share-url"></div>
-          <button class="hc-copy-btn" id="hc-copy-url-btn">
-            📋 Copy Link
-          </button>
+          <div class="hc-btn-row">
+            <button class="hc-copy-btn" id="hc-copy-url-btn">
+              📋 Copy
+            </button>
+            <button class="hc-copy-btn hc-quest-btn" id="hc-quest-btn-host">
+              🥽 Quest
+            </button>
+          </div>
         </div>
         
         <div class="hc-divider"></div>
@@ -411,6 +432,9 @@ function createControls() {
           <div style="color: #888; font-size: 11px; margin-bottom: 10px;">
             Host: <span id="hc-host-name">-</span>
           </div>
+          <button class="hc-copy-btn hc-quest-btn" id="hc-quest-btn-viewer">
+            🥽 Send to Quest
+          </button>
         </div>
         
         <button class="hc-btn hc-btn-danger" id="hc-leave-session-btn">
@@ -455,6 +479,17 @@ function createControls() {
   
   // Copy URL
   document.getElementById('hc-copy-url-btn').addEventListener('click', copyShareUrl);
+  
+  // Send to Quest (host)
+  document.getElementById('hc-quest-btn-host').addEventListener('click', () => {
+    const shareUrl = document.getElementById('hc-share-url').textContent;
+    sendToQuest(shareUrl);
+  });
+  
+  // Send to Quest (viewer)
+  document.getElementById('hc-quest-btn-viewer').addEventListener('click', () => {
+    sendToQuest(window.location.href);
+  });
   
   // End session
   document.getElementById('hc-end-session-btn').addEventListener('click', () => {
@@ -625,14 +660,17 @@ function showHostingPanel(code) {
   
   document.getElementById('hc-active-code').textContent = code;
   
-  // Generate share URL - preserve ws/foundry params for ngrok sharing
+  // Generate share URL - preserve ws/foundry params for remote sharing
   const shareUrl = new URL(window.location.href);
   shareUrl.searchParams.set('session', code);
   
-  // If we're on ngrok but missing ws/foundry params, add the default ngrok ones
   const hostname = shareUrl.hostname;
-  if (hostname.endsWith('.ngrok.app') || hostname.endsWith('.ngrok-free.app')) {
-    // On ngrok - ensure ws and foundry params are set
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+  const isNgrok = hostname.endsWith('.ngrok.app') || hostname.endsWith('.ngrok-free.app');
+  const isLanIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) && !isLocalhost;
+  
+  // If we're on ngrok, add the default ngrok ws/foundry params
+  if (isNgrok) {
     if (!shareUrl.searchParams.has('ws')) {
       // Try to infer from hostname pattern (protoverse.ngrok.app -> protoverse-wsserver.ngrok.app)
       const baseName = hostname.split('.')[0]; // e.g., "protoverse"
@@ -646,6 +684,16 @@ function showHostingPanel(code) {
       shareUrl.searchParams.set('foundry', `wss://${baseName}-foundry.${domain}/ws`);
     }
   }
+  // If we're on a LAN IP, add ws/foundry params pointing to the same IP
+  else if (isLanIp) {
+    if (!shareUrl.searchParams.has('ws')) {
+      shareUrl.searchParams.set('ws', `ws://${hostname}:8765`);
+    }
+    if (!shareUrl.searchParams.has('foundry')) {
+      shareUrl.searchParams.set('foundry', `ws://${hostname}:23646/ws`);
+    }
+  }
+  // For localhost, no params needed (auto-detected)
   
   document.getElementById('hc-share-url').textContent = shareUrl.toString();
 }
@@ -677,7 +725,7 @@ async function copyShareUrl() {
     btnEl.classList.add('copied');
     
     setTimeout(() => {
-      btnEl.textContent = '📋 Copy Link';
+      btnEl.textContent = '📋 Copy';
       btnEl.classList.remove('copied');
     }, 2000);
   } catch (err) {
@@ -691,9 +739,19 @@ async function copyShareUrl() {
     
     btnEl.textContent = '✓ Copied!';
     setTimeout(() => {
-      btnEl.textContent = '📋 Copy Link';
+      btnEl.textContent = '📋 Copy';
     }, 2000);
   }
+}
+
+/**
+ * Send URL to Quest via Meta WebLaunch
+ * https://developers.meta.com/horizon/documentation/web/web-launch/
+ */
+function sendToQuest(url) {
+  const sendToQuestUrl = new URL("https://oculus.com/open_url/");
+  sendToQuestUrl.searchParams.set("url", url);
+  window.open(sendToQuestUrl.toString(), '_blank');
 }
 
 /**

@@ -44,6 +44,77 @@ export async function ensureAudioContext() {
 }
 
 /**
+ * Setup iOS audio unlock - call this once at app startup
+ * Listens for first user interaction and unlocks AudioContext
+ * @param {THREE.AudioListener} threeAudioListener - Optional THREE.js AudioListener to also resume
+ */
+let audioUnlockSetup = false;
+let threeListener = null;
+
+export function setupIOSAudioUnlock(threeAudioListener = null) {
+    if (audioUnlockSetup) return;
+    audioUnlockSetup = true;
+    threeListener = threeAudioListener;
+    
+    const unlockAudio = async () => {
+        console.log("[Audio] User interaction detected, unlocking audio...");
+        
+        // Resume main audio context
+        await ensureAudioContext();
+        
+        // Resume THREE.js AudioListener context (critical for spatial audio on iOS!)
+        if (threeListener && threeListener.context) {
+            const ctx = threeListener.context;
+            console.log("[Audio] THREE context state before resume:", ctx.state);
+            
+            if (ctx.state === 'suspended') {
+                try {
+                    await ctx.resume();
+                    console.log("[Audio] THREE.AudioListener context resumed:", ctx.state);
+                } catch (e) {
+                    console.warn("[Audio] Failed to resume THREE.AudioListener context:", e);
+                }
+            }
+            
+            // iOS workaround: play a silent buffer to truly unlock the context
+            try {
+                const buffer = ctx.createBuffer(1, 1, 22050);
+                const source = ctx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(ctx.destination);
+                source.start(0);
+                console.log("[Audio] iOS silent buffer played");
+            } catch (e) {
+                console.warn("[Audio] Silent buffer workaround failed:", e);
+            }
+            
+            // Check state after workaround
+            console.log("[Audio] THREE context state after workaround:", ctx.state);
+        } else {
+            console.warn("[Audio] No THREE.AudioListener context available!");
+        }
+        
+        // Also try to unlock any HTML5 audio elements
+        document.querySelectorAll('audio').forEach(audio => {
+            audio.muted = false;
+        });
+        
+        // Remove listeners after first unlock
+        document.removeEventListener('touchstart', unlockAudio);
+        document.removeEventListener('touchend', unlockAudio);
+        document.removeEventListener('click', unlockAudio);
+        console.log("[Audio] Audio unlocked");
+    };
+    
+    // Listen for any user interaction
+    document.addEventListener('touchstart', unlockAudio, { once: true });
+    document.addEventListener('touchend', unlockAudio, { once: true });
+    document.addEventListener('click', unlockAudio, { once: true });
+    
+    console.log("[Audio] iOS audio unlock listeners installed");
+}
+
+/**
  * Set the current world data (for use when toggling audio on)
  * @param {Object} worldData - World data object
  */

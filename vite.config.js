@@ -63,15 +63,9 @@ export default defineConfig(({ command }) => ({
   },
   server: {
     port: 3000,
+    host: true,  // Bind to all interfaces (0.0.0.0) for LAN access
     open: true,
-    allowedHosts: [
-      'localhost',
-      'protoverse.ngrok.app',
-      'protoverse-wsserver.ngrok.app',
-      'protoverse-foundry.ngrok.app',
-      '.ngrok.app',  // Allow all ngrok.app subdomains
-      '.ngrok-free.app',  // Allow free tier domains too
-    ],
+    allowedHosts: true,  // Allow any host (needed for LAN IPs and ngrok)
   },
   // Dev: serve public/ for local testing (includes worlds/)
   // Build: disable default publicDir, use plugin to copy excluding worlds/

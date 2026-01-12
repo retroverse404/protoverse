@@ -424,6 +424,17 @@ class FoundryDisplay {
             });
         }
         
+        // iOS Safari workaround: play a tiny silent buffer to fully unlock audio
+        // This is needed because iOS requires actual audio output during user gesture
+        if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+            const silentBuffer = this.audioCtx.createBuffer(1, 1, 22050);
+            const source = this.audioCtx.createBufferSource();
+            source.buffer = silentBuffer;
+            source.connect(this.audioCtx.destination);
+            source.start(0);
+            console.log(`[Foundry] iOS audio unlock triggered`);
+        }
+        
         // Create panner node now that audio context is ready
         if (this.useSpatialAudio) {
             this._createPannerNode();
@@ -463,7 +474,11 @@ class FoundryDisplay {
                 this._restartOnConnect = false; // Only restart once
             }
             
+            // Request keyframe with retries to handle network latency
             this._requestKeyframe("socket-open");
+            // Additional requests with delays for high-latency connections (ngrok, etc.)
+            setTimeout(() => this._requestKeyframe("socket-open-retry-1"), 200);
+            setTimeout(() => this._requestKeyframe("socket-open-retry-2"), 500);
         };
         
         socket.onclose = (ev) => {
@@ -791,11 +806,24 @@ class FoundryDisplay {
             this.texture = null;
         }
         
-        // Close audio context
+        // Clean up audio - only close context if we created it ourselves (not spatial audio)
         if (this.audioCtx) {
-            this.audioCtx.close().catch(() => {});
+            // Don't close shared context (spatial audio uses listener's context)
+            if (!this.useSpatialAudio) {
+                this.audioCtx.close().catch(() => {});
+            }
             this.audioCtx = null;
             this.nextPlaybackTime = null;
+        }
+        
+        // Clean up spatial audio nodes
+        if (this.pannerNode) {
+            this.pannerNode.disconnect();
+            this.pannerNode = null;
+        }
+        if (this.audioGainNode) {
+            this.audioGainNode.disconnect();
+            this.audioGainNode = null;
         }
         
         this.frameCanvas = null;
