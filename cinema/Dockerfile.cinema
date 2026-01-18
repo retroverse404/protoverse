@@ -1,0 +1,63 @@
+# Dockerfile for cinema deployments
+# Builds foundry-player + ws-server with embedded movie
+#
+# Build context should be the cinema/<movie>/ directory
+# Movie file should be in cinema/<movie>/movie/<name>.mp4
+
+# =============================================================================
+# Stage 1: Build foundry-player from source
+# =============================================================================
+FROM rust:1.83-slim-bookworm as builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY foundry-player/Cargo.toml ./Cargo.toml
+COPY foundry-player/src ./src
+
+RUN cargo build --release
+
+# =============================================================================
+# Stage 2: Runtime
+# =============================================================================
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    ffmpeg \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy foundry-player binary
+COPY --from=builder /build/target/release/foundry-player /app/foundry-player
+
+# Copy frontend JS files
+COPY foundry-player/frontend/ /app/src/
+
+# Copy movie files from the cinema/<movie>/movie/ directory
+COPY movie/ /app/movies/
+
+# Copy movie metadata
+COPY metadata.json /app/metadata.json
+
+# Copy ws-server and install dependencies
+COPY ws-server.js /app/ws-server.js
+COPY package.json /app/package.json
+COPY package-lock.json /app/package-lock.json
+RUN npm ci --omit=dev || npm install ws
+
+# Copy entrypoint
+COPY entrypoint.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+EXPOSE 8080 8765
+
+CMD ["/app/start.sh"]

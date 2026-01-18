@@ -65,7 +65,7 @@ export default defineConfig(({ command }) => ({
     port: 3000,
     host: true,  // Bind to all interfaces (0.0.0.0) for LAN access
     open: true,
-    allowedHosts: true,  // Allow any host (needed for LAN IPs and ngrok)
+    allowedHosts: true,  // Allow any host (needed for LAN IPs)
   },
   // Dev: serve public/ for local testing (includes worlds/)
   // Build: disable default publicDir, use plugin to copy excluding worlds/

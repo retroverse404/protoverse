@@ -616,6 +616,7 @@ export class CharacterManager {
                     playerPosition,
                     playerDistance,
                     deltaTime,
+                    worldUrl,           // World URL for this character
                     scene: this.scene,  // For raycasting against collision meshes
                     manager: this,      // Allow characters to trigger state transitions
                 };

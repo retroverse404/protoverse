@@ -3,7 +3,19 @@
  * 
  * Centralized configuration for the entire application.
  * Import this file to access all configuration options.
+ * 
+ * Environment variables (set in .env file):
+ *   VITE_WS_URL - WebSocket server URL for multiplayer
+ *   VITE_CDN_URL - CDN base URL for assets
+ *   VITE_CONVEX_URL - Convex HTTP URL for session discovery
+ *   VITE_PROTOVERSE_URL - Public URL for this app (used by lobby)
+ *   VITE_BRAINTRUST_API_KEY - API key for AI chat
+ * 
+ * See .env.example for documentation.
  */
+
+// Helper to get env var with fallback
+const env = (key, fallback) => import.meta.env?.[key] || fallback;
 
 export const config = {
     // ========== World Settings ==========
@@ -33,18 +45,16 @@ export const config = {
     
     // ========== URL / CDN Settings ==========
     urls: {
-        // Use CDN for assets (splats, collision meshes, etc.)
-        useCdn: true,
+        // CDN base URL for assets (splats, collision meshes, etc.)
+        // Set VITE_CDN_URL in .env, or leave empty to use local /worlds
+        cdnBase: env('VITE_CDN_URL', ''),
         
-        // CDN base URL (used when useCdn is true)
-        cdnBase: "https://public-spz.t3.storage.dev",
-        
-        // Local file base URL (used when useCdn is false)
+        // Local file base URL (used when cdnBase is empty)
         localBase: "/worlds",
         
-        // Get the active URL base based on useCdn setting
+        // Get the active URL base (CDN if set, otherwise local)
         get urlBase() {
-            return this.useCdn ? this.cdnBase : this.localBase;
+            return this.cdnBase || this.localBase;
         }
     },
     
@@ -79,11 +89,23 @@ export const config = {
         // Enable multiplayer features
         enabled: true,
         
-        // WebSocket server URL (null = use environment variable VITE_WS_URL)
-        wsUrl: "ws://localhost:8765",
+        // WebSocket server URL
+        // Set VITE_WS_URL in .env for production
+        wsUrl: env('VITE_WS_URL', 'ws://localhost:8765'),
         
         // Player name prefix (random number appended)
         playerNamePrefix: "player",
+    },
+    
+    // ========== Lobby / Session Discovery ==========
+    lobby: {
+        // Convex HTTP URL for session discovery and AI proxy
+        // Set VITE_CONVEX_HTTP_URL in .env (not VITE_CONVEX_URL - that's managed by Convex)
+        convexUrl: env('VITE_CONVEX_HTTP_URL', ''),
+        
+        // Public URL where Protoverse is hosted (for join links)
+        // Set VITE_PROTOVERSE_URL in .env
+        protoverseUrl: env('VITE_PROTOVERSE_URL', 'http://localhost:3000'),
     },
     
     // ========== Audio Settings ==========

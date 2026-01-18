@@ -1,92 +1,92 @@
 # ProtoVerse
 
-A WebXR-enabled 3D metaverse built with Three.js and Gaussian Splatting. Explore interconnected worlds through portals, interact with AI-powered characters, and share your screen in immersive 3D.
+<p align="center">
+  <img src="docs/images/header1.png" width="24%" />
+  <img src="docs/images/header2.png" width="24%" />
+  <img src="docs/images/header3.png" width="24%" />
+  <img src="docs/images/header4.png" width="24%" />
+</p>
+
+A WebXR metaverse built with Three.js and Gaussian Splatting. Explore vast, interconnected 3D worlds through portals, interact with AI characters, watch movies together, and experience physics-based movement in VR.
 
 ## Features
 
-- **Gaussian Splatting** - High-fidelity 3D scenes using SparkJS
-- **Portal System** - Seamless travel between interconnected worlds  
-- **WebXR/VR Support** - Full Quest 3 compatibility with physics-based movement
-- **AI Characters** - NPCs with Braintrust-powered conversations
-- **VR Chat** - Virtual keyboard and chat panel for VR interactions
-- **Screen Streaming** - Share your desktop via Foundry (custom H.264 streaming)
-- **Spatial Audio** - Positional audio sources in the world
-- **Multiplayer** - See other players as ghost avatars (optional)
+- **Infinite Gaussian Splat Universes** - Dynamically load arbitrarily large worlds using SparkJS. Worlds are streamed on-demand as you explore, with automatic loading/unloading based on proximity.
+
+- **Portal System** - Seamless travel between interconnected worlds via bidirectional portals. The universe is structured as a directed graph, loading worlds up to N hops away.
+
+- **Physics & Collisions** - Rapier.js physics with collision meshes. Thrust-based movement that bounces off walls and surfaces.
+
+- **AI Characters** - NPCs with state machines, waypoint-based navigation, and AI-powered conversations via Braintrust. Characters react to player proximity and can provide movie commentary.
+
+- **WebXR/VR Support** - Full Quest 3 compatibility with physics-based locomotion, VR keyboard, and 3D chat panels.
+
+- **Movie & Screen Streaming** - Watch synchronized movies in VR theaters. Custom H.264 streaming via Foundry server with WebCodecs decoding.
+
+- **Spatial Audio** - Positional audio sources placed throughout worlds, plus background music per world.
+
+- **Multiplayer** - Real-time sessions with ghost avatars. Host a viewing party and watch movies together with friends.
 
 ## Quick Start
 
 ```bash
-# Install dependencies
 npm install
-
-# Start dev server
 npm run dev
-
-# Open http://localhost:5173
+# Open http://localhost:3000
 ```
 
-## VR Setup
+## Configuration
 
-1. Connect Quest 3 to same network as dev machine
-2. Open Quest browser and navigate to `http://<your-ip>:5173`
-3. Click "Enter VR" button
+Copy `.env.example` to `.env` and customize:
 
-## Screen Streaming (Foundry)
-
-See [docs/foundry-streaming.md](docs/foundry-streaming.md) for setup instructions.
-
-Requires:
-- Foundry server (`~/projects/foundry/`)
-- BlackHole audio driver (for system audio)
-- macOS Screen Recording permission
-
-## AI Chat
-
-Characters can have AI conversations via [Braintrust](https://braintrust.dev).
-
-1. Set `VITE_BRAINTRUST_API_KEY` in `.env`
-2. Create prompts at braintrust.dev
-3. Configure `CHAT.promptSlug` in character files
-
-## Architecture
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system diagrams.
-See [AICodeGuide.md](AICodeGuide.md) for AI assistant guidance.
-
-## World Configuration
-
-Worlds are defined in `public/worlds/<name>/world.json`:
-
-```json
-{
-  "name": "My World",
-  "splatUrl": "/myworld/splats/world.spz",
-  "collisionUrl": "/myworld/collision.glb",
-  "position": [0, 0, 0],
-  "portals": [...],
-  "characters": [...],
-  "audioSources": [...],
-  "foundryDisplays": [...]
-}
+```bash
+cp .env.example .env
 ```
 
-## Controls
+Key settings:
+- `VITE_WS_URL` - Multiplayer WebSocket server URL
+- `VITE_CDN_URL` - CDN for world assets (leave empty for local)
+- `VITE_CONVEX_HTTP_URL` - Convex HTTP endpoint (session discovery + AI proxy)
 
-### Desktop
-- **WASD/Arrows** - Thrust movement
-- **Mouse** - Look around
-- **Click** - Lock pointer
+Edit `config.js` for additional options (world settings, physics, VR, etc.)
 
-### VR (Quest 3)
-- **Left Thumbstick** - Movement thrust
-- **Right Thumbstick** - Rotation
-- **Grip** - (reserved)
-- **Trigger** - VR keyboard typing
+## AI Setup (Braintrust)
 
-## DAG Creation
+AI character conversations are powered by [Braintrust](https://braintrust.dev). The prompts are stored in `prompts/` and proxied securely through Convex.
 
-The protoverse is dynamically constructed in the browser starting with a world.json that contains the URL to the splats for that world and a list of portals to other worlds. Portals are all bidirectional. The loading logic will load in all worlds and portals up to N hops away from the root world. As the viewer moves to another world the same traversal is applied and anything beyond the N hops is flushed.
+```bash
+# 1. Create a Braintrust account and get an API key
+# 2. Push the prompts to your Braintrust project
+npx braintrust login
+npx braintrust push --project-name "protoverse" prompts/
+
+# 3. Set the API key in Convex (server-side, secure)
+npx convex env set BRAINTRUST_API_KEY sk-your-key-here
+```
+
+See [docs/deployment-guide.md](docs/deployment-guide.md) for full setup instructions.
+
+## Documentation
+
+- [AICodeGuide.md](AICodeGuide.md) - Architecture and code guide
+- [docs/deployment-guide.md](docs/deployment-guide.md) - Deployment instructions
+- [cinema/README.md](cinema/README.md) - Movie theater setup
+
+## Project Structure
+
+```
+├── main.js              # Entry point
+├── proto.js             # World/portal management
+├── scene.js             # Three.js scene setup
+├── characters/          # AI character definitions
+├── prompts/             # Braintrust AI prompts (synced via CLI)
+├── multiplayer/         # Real-time multiplayer system
+├── vr/                  # VR UI (keyboard, chat panels)
+├── convex/              # Session tracking + AI proxy backend
+├── cinema/              # Movie theater deployment
+└── public/worlds/       # World assets and configs
+```
 
 ## License
 
-Private project
+MIT License - see [LICENSE](LICENSE)

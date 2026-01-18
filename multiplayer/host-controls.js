@@ -55,22 +55,28 @@ function checkUrlForSession() {
   
   if (sessionCode) {
     console.log(`[HostControls] Found session code in URL: ${sessionCode}`);
-    // Pre-fill the session code but don't auto-join - let user enter name first
+    
+    // Auto-join: if session code is present, automatically join
+    // Use stored name or generate a random one
+    const name = localStorage.getItem('protoverse-name') || getDefaultName();
+    localStorage.setItem('protoverse-name', name);
+    
+    // Set the name input for display
     setTimeout(() => {
-      const codeInput = document.getElementById('hc-join-code-input');
-      if (codeInput) {
-        codeInput.value = sessionCode;
-      }
-      // Hide create section, show join section prominently
-      const createBtn = document.getElementById('hc-create-btn');
-      if (createBtn) {
-        createBtn.style.display = 'none';
-      }
-      const orDiv = document.querySelector('.hc-or');
-      if (orDiv) {
-        orDiv.style.display = 'none';
+      const nameInput = document.getElementById('hc-name-input');
+      if (nameInput) {
+        nameInput.value = name;
       }
     }, 100);
+    
+    console.log(`[HostControls] Auto-joining session ${sessionCode} as "${name}"`);
+    
+    // Join the session automatically
+    SessionManager.joinSession({
+      sessionCode: sessionCode,
+      name,
+      color: getRandomColor(),
+    });
   }
 }
 
@@ -666,26 +672,10 @@ function showHostingPanel(code) {
   
   const hostname = shareUrl.hostname;
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
-  const isNgrok = hostname.endsWith('.ngrok.app') || hostname.endsWith('.ngrok-free.app');
   const isLanIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) && !isLocalhost;
   
-  // If we're on ngrok, add the default ngrok ws/foundry params
-  if (isNgrok) {
-    if (!shareUrl.searchParams.has('ws')) {
-      // Try to infer from hostname pattern (protoverse.ngrok.app -> protoverse-wsserver.ngrok.app)
-      const baseName = hostname.split('.')[0]; // e.g., "protoverse"
-      const domain = hostname.split('.').slice(1).join('.'); // e.g., "ngrok.app"
-      shareUrl.searchParams.set('ws', `wss://${baseName}-wsserver.${domain}`);
-    }
-    if (!shareUrl.searchParams.has('foundry')) {
-      const baseName = hostname.split('.')[0];
-      const domain = hostname.split('.').slice(1).join('.');
-      // Include /ws path that foundry-player expects
-      shareUrl.searchParams.set('foundry', `wss://${baseName}-foundry.${domain}/ws`);
-    }
-  }
   // If we're on a LAN IP, add ws/foundry params pointing to the same IP
-  else if (isLanIp) {
+  if (isLanIp) {
     if (!shareUrl.searchParams.has('ws')) {
       shareUrl.searchParams.set('ws', `ws://${hostname}:8765`);
     }
@@ -693,7 +683,7 @@ function showHostingPanel(code) {
       shareUrl.searchParams.set('foundry', `ws://${hostname}:23646/ws`);
     }
   }
-  // For localhost, no params needed (auto-detected)
+  // For localhost or Netlify+Fly.io, params are passed in URL or auto-detected
   
   document.getElementById('hc-share-url').textContent = shareUrl.toString();
 }

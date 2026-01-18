@@ -13,6 +13,7 @@ public/worlds/
 .env.local
 .env.*.local
 
+
 # Editor directories and files
 .vscode/
 .idea/
@@ -33,3 +34,13 @@ yarn-error.log*
 
 # Local Netlify folder
 .netlify
+
+# Local scripts (user-specific, not tracked)
+scripts/local/
+
+# Convex generated files
+convex/_generated/
+
+# Lobby config (user-specific URLs)
+lobby/config.js
+public/lobby/config.js

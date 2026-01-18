@@ -5,7 +5,9 @@
  * the host (who runs the AI) and viewers (who puppet the characters).
  */
 
+import * as THREE from 'three';
 import * as SessionManager from './session-manager.js';
+import { showSplatCommentary, hideSplatCommentary } from '../splat-dialog-box.js';
 
 // Local references
 let characterManagerRef = null;
@@ -17,6 +19,12 @@ let unsubscribers = [];
 
 // Puppet mode: viewers receive character updates instead of running AI
 const puppetCharacters = new Map(); // characterId -> { position, rotation, animation, comment }
+
+// Track displayed comments to avoid re-showing the same comment
+const lastDisplayedComment = new Map(); // characterId -> { comment, timestamp }
+
+// VR mode state (set from main.js)
+let isInVRMode = false;
 
 /**
  * Initialize character sync
@@ -48,6 +56,15 @@ export function initCharacterSync(characterManager) {
     unsubscribers.push(SessionManager.onCharacterSync((data) => {
         if (!isHost && data.characters) {
             applyCharacterSync(data.characters);
+        }
+    }));
+    
+    // Host receives request to send full state when new viewer joins
+    unsubscribers.push(SessionManager.onRequestFullState((msg) => {
+        if (isHost && characterManagerRef && worldUrlRef) {
+            console.log(`[CharacterSync] Sending full character state to new viewer: ${msg.viewerName}`);
+            // Immediately broadcast current character state
+            broadcastCharacterState();
         }
     }));
 }
@@ -94,6 +111,7 @@ function broadcastCharacterState() {
     for (const instance of characters) {
         if (!instance.model) continue;
         
+        const stateData = instance.stateData || {};
         const state = {
             id: instance.definition?.id || instance.instanceData?.type,
             position: instance.model.position.toArray(),
@@ -101,7 +119,12 @@ function broadcastCharacterState() {
             animation: instance.currentAnimation,
             state: instance.currentState,
             // Include any active comment from stateData
-            comment: instance.stateData?.lastComment || null,
+            comment: stateData.lastComment || null,
+            commentTime: stateData.lastCommentTime || null,
+            // Include screen info for VR positioning
+            screenPosition: stateData.screenPosition ? stateData.screenPosition.toArray() : null,
+            screenRotation: stateData.screenRotation ? stateData.screenRotation.toArray() : null,
+            panelConfig: stateData.displayConfig?.vrCommentaryPanel || null,
         };
         
         characterStates.push(state);
@@ -123,8 +146,44 @@ function applyCharacterSync(characters) {
             animation: charState.animation,
             state: charState.state,
             comment: charState.comment,
+            commentTime: charState.commentTime,
             receivedAt: Date.now(),
         });
+        
+        // Display new commentary (if changed)
+        if (charState.comment) {
+            const lastComment = lastDisplayedComment.get(charState.id);
+            const isNewComment = !lastComment || 
+                lastComment.comment !== charState.comment ||
+                (charState.commentTime && lastComment.timestamp !== charState.commentTime);
+            
+            if (isNewComment) {
+                lastDisplayedComment.set(charState.id, {
+                    comment: charState.comment,
+                    timestamp: charState.commentTime || Date.now(),
+                });
+                
+                // Show commentary using SplatDialogBox (works in both VR and non-VR)
+                console.log(`[CharacterSync] Showing synced commentary: "${charState.comment}"`);
+                
+                // Use splat-based dialog box for 3D commentary
+                // Convert arrays back to THREE objects if needed
+                let screenPos = null;
+                let screenRot = null;
+                
+                if (charState.screenPosition && Array.isArray(charState.screenPosition)) {
+                    screenPos = new THREE.Vector3().fromArray(charState.screenPosition);
+                }
+                if (charState.screenRotation && Array.isArray(charState.screenRotation)) {
+                    screenRot = new THREE.Quaternion().fromArray(charState.screenRotation);
+                }
+                
+                showSplatCommentary(charState.comment, charState.id || 'Y-Bot', 
+                    screenPos, 
+                    screenRot,
+                    charState.panelConfig || null);
+            }
+        }
     }
 }
 
@@ -186,6 +245,13 @@ export function getPuppetState(characterId) {
 }
 
 /**
+ * Set VR mode (call from main.js when entering/exiting VR)
+ */
+export function setCharacterSyncVRMode(inVR) {
+    isInVRMode = inVR;
+}
+
+/**
  * Cleanup
  */
 export function disposeCharacterSync() {
@@ -194,10 +260,9 @@ export function disposeCharacterSync() {
     }
     unsubscribers = [];
     puppetCharacters.clear();
+    lastDisplayedComment.clear();
     characterManagerRef = null;
     worldUrlRef = null;
     isHost = false;
+    isInVRMode = false;
 }
-
-// Need THREE for Vector3 and Quaternion
-import * as THREE from 'three';

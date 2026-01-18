@@ -1,7 +1,13 @@
 // Protoverse WebSocket relay server with session management
 // Usage:
 //   npm install ws
-//   PORT=8080 node tools/ws-server.js
+//   PORT=8080 node multiplayer/ws-server.js
+//
+// Environment variables:
+//   CONVEX_HTTP_URL - Convex HTTP endpoint for session tracking (optional)
+//   FLY_APP_NAME - Name of this Fly.io app (optional, auto-detected)
+//   WS_PUBLIC_URL - Public WebSocket URL (optional)
+//   FOUNDRY_PUBLIC_URL - Public Foundry URL (optional)
 
 import { WebSocketServer } from "ws";
 
@@ -10,6 +16,16 @@ const PING_INTERVAL_MS = 30_000;
 const ROOM_TIMEOUT_MS = 10 * 60_000; // cleanup delay after empty
 const SESSION_TIMEOUT_MS = 30 * 60_000; // sessions expire after 30min of no host
 const MAX_VIEWERS_DEFAULT = 8;
+const CONVEX_HEARTBEAT_MS = 30_000; // Heartbeat to Convex every 30s
+
+// Convex configuration (optional - for session lobby)
+const CONVEX_HTTP_URL = process.env.CONVEX_HTTP_URL || null;
+const FLY_APP_NAME = process.env.FLY_APP_NAME || process.env.FLY_APP || 'unknown';
+const WS_PUBLIC_URL = process.env.WS_PUBLIC_URL || `wss://${FLY_APP_NAME}.fly.dev:8765`;
+const FOUNDRY_PUBLIC_URL = process.env.FOUNDRY_PUBLIC_URL || `wss://${FLY_APP_NAME}.fly.dev/ws`;
+
+// Convex heartbeat timer
+let convexHeartbeatInterval = null;
 
 // worldId -> Map<clientId, ws>
 const rooms = new Map();
@@ -18,6 +34,104 @@ const rooms = new Map();
 const sessions = new Map();
 
 let nextClientId = 1;
+
+// ============ CONVEX SESSION TRACKING ============
+
+/**
+ * Report session to Convex (register, heartbeat, or end)
+ */
+async function convexRequest(endpoint, data) {
+  if (!CONVEX_HTTP_URL) return null;
+  
+  try {
+    const url = `${CONVEX_HTTP_URL}${endpoint}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    
+    if (!response.ok) {
+      console.warn(`[Convex] ${endpoint} failed:`, response.status);
+      return null;
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.warn(`[Convex] ${endpoint} error:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Register a session with Convex
+ */
+async function convexRegisterSession(session, code) {
+  if (!CONVEX_HTTP_URL) return;
+  
+  console.log(`[Convex] Registering session ${code}`);
+  await convexRequest('/session/register', {
+    code,
+    hostName: session.hostName,
+    hostClientId: session.hostClientId,
+    movieTitle: session.movieTitle || 'Watch Party',
+    worldUrl: session.worldUrl,
+    flyApp: FLY_APP_NAME,
+    wsUrl: WS_PUBLIC_URL,
+    foundryUrl: session.foundryUrl || FOUNDRY_PUBLIC_URL,
+    maxViewers: session.maxViewers,
+  });
+}
+
+/**
+ * Send heartbeat to Convex for all active sessions
+ */
+async function convexHeartbeat() {
+  if (!CONVEX_HTTP_URL || sessions.size === 0) return;
+  
+  for (const [code, session] of sessions) {
+    const room = rooms.get(session.worldUrl);
+    const viewerCount = room ? Math.max(0, room.size - 1) : 0;
+    
+    await convexRequest('/session/heartbeat', {
+      code,
+      viewerCount,
+      isMoviePlaying: session.isMoviePlaying || false,
+    });
+  }
+}
+
+/**
+ * End a session in Convex
+ */
+async function convexEndSession(code) {
+  if (!CONVEX_HTTP_URL) return;
+  
+  console.log(`[Convex] Ending session ${code}`);
+  await convexRequest('/session/end', { code });
+}
+
+/**
+ * Start Convex heartbeat interval
+ */
+function startConvexHeartbeat() {
+  if (!CONVEX_HTTP_URL) return;
+  
+  if (convexHeartbeatInterval) {
+    clearInterval(convexHeartbeatInterval);
+  }
+  
+  console.log(`[Convex] Starting heartbeat to ${CONVEX_HTTP_URL}`);
+  convexHeartbeatInterval = setInterval(convexHeartbeat, CONVEX_HEARTBEAT_MS);
+}
+
+// Start heartbeat when server starts
+if (CONVEX_HTTP_URL) {
+  console.log(`[Convex] Session tracking enabled: ${CONVEX_HTTP_URL}`);
+  startConvexHeartbeat();
+} else {
+  console.log('[Convex] Session tracking disabled (no CONVEX_HTTP_URL)');
+}
 
 const wss = new WebSocketServer({ host: '0.0.0.0', port: PORT });
 console.log(`WS server listening on 0.0.0.0:${PORT} (all interfaces)`);
@@ -34,10 +148,16 @@ function generateSessionCode() {
   return code;
 }
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
   const clientId = String(nextClientId++);
   ws.clientId = clientId;
   ws.isAlive = true;
+  
+  // Log connection with origin info for debugging
+  const origin = req.headers.origin || 'unknown';
+  const ip = req.socket.remoteAddress;
+  console.log(`[WS] Client ${clientId} connected from ${ip} (origin: ${origin})`);
+  console.log(`[WS] Active sessions: ${[...sessions.keys()].join(', ') || '(none)'}`);
 
   ws.on("pong", () => {
     ws.isAlive = true;
@@ -48,6 +168,26 @@ wss.on("connection", (ws) => {
     try {
       msg = JSON.parse(data.toString());
     } catch {
+      return;
+    }
+
+    // ============ DEBUG ============
+    
+    // Debug: list active sessions
+    if (msg.type === "debug-sessions") {
+      const sessionList = [...sessions.entries()].map(([code, s]) => ({
+        code,
+        hostClientId: s.hostClientId,
+        worldUrl: s.worldUrl,
+        createdAt: s.createdAt,
+        age: Math.round((Date.now() - s.createdAt) / 1000) + 's'
+      }));
+      ws.send(JSON.stringify({
+        type: "debug-sessions-response",
+        sessions: sessionList,
+        totalSessions: sessions.size
+      }));
+      console.log(`[Debug] Sessions requested by client ${clientId}:`, sessionList);
       return;
     }
 
@@ -91,6 +231,10 @@ wss.on("connection", (ws) => {
       joinRoom(ws, worldUrl, clientId);
       
       console.log(`[Session] Created ${sessionCode} for world ${worldUrl} by ${session.hostName}`);
+      console.log(`[Session] Active sessions after create: ${[...sessions.keys()].join(', ')}`);
+      
+      // Register with Convex for lobby discovery
+      convexRegisterSession(session, sessionCode);
       
       ws.send(JSON.stringify({
         type: "session-created",
@@ -108,12 +252,18 @@ wss.on("connection", (ws) => {
     // Viewer joins an existing session
     if (msg.type === "join-session") {
       const { sessionCode, name, color } = msg;
-      const session = sessions.get(sessionCode?.toUpperCase());
+      const upperCode = sessionCode?.toUpperCase();
+      
+      console.log(`[Session] Join attempt: code="${upperCode}" (original: "${sessionCode}")`);
+      console.log(`[Session] Active sessions: ${[...sessions.keys()].join(', ') || '(none)'}`);
+      
+      const session = sessions.get(upperCode);
       
       if (!session) {
+        console.log(`[Session] Session not found: "${upperCode}"`);
         ws.send(JSON.stringify({ 
           type: "session-error", 
-          error: "Session not found" 
+          error: `Session not found: ${upperCode}` 
         }));
         return;
       }
@@ -154,6 +304,23 @@ wss.on("connection", (ws) => {
       
       // Broadcast updated session info
       broadcastSessionInfo(ws.sessionCode);
+      
+      // Request full state from host so the new viewer sees current positions
+      // (reuse 'room' variable from above - it was updated by joinRoom)
+      const updatedRoom = rooms.get(session.worldUrl);
+      if (updatedRoom) {
+        for (const [, client] of updatedRoom) {
+          if (client.sessionCode === ws.sessionCode && client.isHost && client.readyState === 1) {
+            client.send(JSON.stringify({
+              type: "request-full-state",
+              viewerId: clientId,
+              viewerName: ws.name,
+            }));
+            console.log(`[Session] Requested full state from host for new viewer ${ws.name}`);
+            break;
+          }
+        }
+      }
       return;
     }
 
@@ -177,38 +344,40 @@ wss.on("connection", (ws) => {
 
     // ============ STATE SYNC ============
 
-    // Player position/rotation state
+    // Player position/rotation state - SESSION SCOPED
     if (msg.type === "state" && ws.world) {
       if (msg.meta?.color) ws.color = msg.meta.color;
-      broadcast(ws.world, {
-        type: "state",
+      
+      // Only broadcast to session members (session-scoped visibility)
+      if (ws.sessionCode) {
+        broadcastToSession(ws.sessionCode, {
+          type: "state",
+          from: clientId,
+          name: ws.name,
+          color: ws.color,
+          pos: msg.pos,
+          rot: msg.rot,
+          meta: msg.meta,
+          t: Date.now(),
+        }, ws);
+      }
+      // Legacy mode (no session) - no broadcasting to prevent confusion
+      return;
+    }
+
+    // Playback sync (host only) - session scoped
+    if (msg.type === "playback-sync" && ws.isHost && ws.sessionCode) {
+      broadcastToSession(ws.sessionCode, {
+        type: "playback-sync",
+        isPaused: msg.isPaused,
+        timestamp: msg.timestamp,
         from: clientId,
-        name: ws.name,
-        color: ws.color,
-        pos: msg.pos,
-        rot: msg.rot,
-        meta: msg.meta,
         t: Date.now(),
       }, ws);
       return;
     }
 
-    // Playback sync (host only)
-    if (msg.type === "playback-sync" && ws.isHost && ws.sessionCode) {
-      const session = sessions.get(ws.sessionCode);
-      if (session) {
-        broadcast(ws.world, {
-          type: "playback-sync",
-          isPaused: msg.isPaused,
-          timestamp: msg.timestamp,
-          from: clientId,
-          t: Date.now(),
-        }, ws);
-      }
-      return;
-    }
-
-    // Foundry connection sync (host only)
+    // Foundry connection sync (host only) - session scoped
     if (msg.type === "foundry-sync") {
       console.log(`[Session] Received foundry-sync: isHost=${ws.isHost}, sessionCode=${ws.sessionCode}, isConnected=${msg.isConnected}`);
       
@@ -226,7 +395,7 @@ wss.on("connection", (ws) => {
         console.warn(`[Session] Session not found for code: ${ws.sessionCode}`);
       }
       
-      broadcast(ws.world, {
+      broadcastToSession(ws.sessionCode, {
         type: "foundry-sync",
         isConnected: msg.isConnected,
         foundryUrl: msg.foundryUrl,
@@ -237,9 +406,9 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // Character/AI sync (host only)
+    // Character/AI sync (host only) - session scoped
     if (msg.type === "character-sync" && ws.isHost && ws.sessionCode) {
-      broadcast(ws.world, {
+      broadcastToSession(ws.sessionCode, {
         type: "character-sync",
         characters: msg.characters, // Array of { id, position, rotation, animation, comment }
         from: clientId,
@@ -250,15 +419,30 @@ wss.on("connection", (ws) => {
 
     // ============ CHAT ============
 
-    if (msg.type === "chat" && ws.world) {
-      broadcast(ws.world, {
+    // Chat is session-scoped - only session members see messages
+    if (msg.type === "chat" && ws.sessionCode) {
+      const chatMsg = {
         type: "chat",
         from: clientId,
         name: ws.name,
         color: ws.color,
         message: msg.message?.slice(0, 500), // Limit message length
         t: Date.now(),
-      }); // Include sender so they see their own message
+      };
+      
+      // Send to all session members INCLUDING sender
+      const session = sessions.get(ws.sessionCode);
+      if (session) {
+        const room = rooms.get(session.worldUrl);
+        if (room) {
+          const payload = JSON.stringify(chatMsg);
+          for (const [, client] of room) {
+            if (client.sessionCode === ws.sessionCode && client.readyState === 1) {
+              client.send(payload);
+            }
+          }
+        }
+      }
       return;
     }
   });
@@ -267,7 +451,8 @@ wss.on("connection", (ws) => {
     if (ws.sessionCode) {
       leaveSession(ws, clientId);
     } else if (ws.world) {
-      leaveRoom(ws.world, clientId);
+      // No session - just leave the room quietly (no one to notify)
+      leaveRoom(ws.world, clientId, null);
     }
   });
 });
@@ -306,6 +491,8 @@ setInterval(() => {
         }
       }
       
+      // Remove from Convex
+      convexEndSession(code);
       sessions.delete(code);
     }
   }
@@ -321,9 +508,13 @@ function joinRoom(ws, world, clientId) {
   const room = rooms.get(world);
   room.set(clientId, ws);
 
-  // Send current peers to new client
+  // Only send peers who are in the SAME SESSION (session-scoped visibility)
   const peers = [...room.entries()]
-    .filter(([id]) => id !== clientId)
+    .filter(([id, client]) => {
+      if (id === clientId) return false; // exclude self
+      // Only include peers in the same session
+      return ws.sessionCode && client.sessionCode === ws.sessionCode;
+    })
     .map(([id, client]) => ({ 
       id, 
       name: client.name, 
@@ -332,21 +523,29 @@ function joinRoom(ws, world, clientId) {
     }));
   ws.send(JSON.stringify({ type: "peers", peers }));
 
-  // Notify others of join
-  broadcast(world, { 
-    type: "join", 
-    id: clientId, 
-    name: ws.name, 
-    color: ws.color,
-    isHost: ws.isHost || false,
-  }, ws);
+  // Notify only session members of join (session-scoped)
+  if (ws.sessionCode) {
+    broadcastToSession(ws.sessionCode, { 
+      type: "join", 
+      id: clientId, 
+      name: ws.name, 
+      color: ws.color,
+      isHost: ws.isHost || false,
+    }, ws);
+  }
 }
 
-function leaveRoom(world, clientId) {
+function leaveRoom(world, clientId, sessionCode = null) {
   const room = rooms.get(world);
   if (!room) return;
+  
   room.delete(clientId);
-  broadcast(world, { type: "leave", id: clientId });
+  
+  // Only notify session members of the leave (session-scoped)
+  if (sessionCode) {
+    broadcastToSession(sessionCode, { type: "leave", id: clientId });
+  }
+  
   if (room.size === 0) {
     setTimeout(() => {
       if (room.size === 0) rooms.delete(world);
@@ -357,6 +556,7 @@ function leaveRoom(world, clientId) {
 function leaveSession(ws, clientId) {
   const sessionCode = ws.sessionCode;
   const session = sessions.get(sessionCode);
+  const worldUrl = ws.world;
   
   if (session && ws.isHost) {
     // Host leaving ends the session
@@ -377,14 +577,21 @@ function leaveSession(ws, clientId) {
       }
     }
     
+    // Remove from Convex
+    convexEndSession(sessionCode);
     sessions.delete(sessionCode);
+  } else if (sessionCode) {
+    // Viewer leaving - notify session members
+    broadcastToSession(sessionCode, { type: "leave", id: clientId }, ws);
   }
   
   ws.sessionCode = null;
   ws.isHost = false;
   
-  if (ws.world) {
-    leaveRoom(ws.world, clientId);
+  if (worldUrl) {
+    // Pass sessionCode so leaveRoom knows which session to notify
+    // (but since we already notified above, pass null to avoid double-notify)
+    leaveRoom(worldUrl, clientId, null);
   }
   
   // Broadcast updated session info if session still exists
@@ -439,6 +646,26 @@ function broadcast(world, msg, except) {
   const payload = JSON.stringify(msg);
   for (const [, client] of room) {
     if (client !== except && client.readyState === 1) {
+      client.send(payload);
+    }
+  }
+}
+
+/**
+ * Broadcast to only clients in a specific session
+ */
+function broadcastToSession(sessionCode, msg, except) {
+  const session = sessions.get(sessionCode);
+  if (!session) return;
+  
+  const room = rooms.get(session.worldUrl);
+  if (!room) return;
+  
+  const payload = JSON.stringify(msg);
+  for (const [, client] of room) {
+    if (client !== except && 
+        client.sessionCode === sessionCode && 
+        client.readyState === 1) {
       client.send(payload);
     }
   }

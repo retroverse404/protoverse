@@ -28,9 +28,9 @@ import {
     startVRChatStreaming, 
     appendVRChatStreaming, 
     endVRChatStreaming 
-} from "../vr-chat.js";
-import { onCinemaModeChange, offCinemaModeChange, captureFoundryFrame, isCinemaModeActive, getFoundryScreenPosition, getFoundryScreenRotation, getFoundryMovieConfig, getFoundryDisplayConfig, isFoundryDisplayPaused } from "../foundry-share.js";
-import { initVRCommentary, showVRCommentary, hideVRCommentary } from "../vr-commentary-panel.js";
+} from "../vr/vr-chat.js";
+import { onCinemaModeChange, offCinemaModeChange, captureFoundryFrame, isCinemaModeActive, getFoundryScreenPosition, getFoundryScreenRotation, getFoundryMovieConfig, getFoundryDisplayConfig, isFoundryDisplayPaused, isFoundryConnected } from "../foundry-share.js";
+import { showSplatCommentary, hideSplatCommentary } from "../splat-dialog-box.js";
 
 const forwardDir = new THREE.Vector3();
 const targetDir = new THREE.Vector3();
@@ -63,13 +63,14 @@ const MOVEMENT = {
     idleChance: 0.2,         // 20% chance to pause at a node instead of moving
     idleTimeMin: 2.0,        // Minimum idle time when randomly pausing
     idleTimeMax: 5.0,        // Maximum idle time when randomly pausing
+    maxWalkDistance: 50,     // Safety: max distance to walk without reaching target
 };
 
 /**
  * Chat settings
  */
 const CHAT = {
-    promptSlug: "ybot-hello",  // BrainTrust prompt slug for regular chat
+    promptSlug: "ybot-hello-444b",  // BrainTrust prompt slug for regular chat
 };
 
 /**
@@ -97,7 +98,23 @@ let activeYBotManager = null;
 
 // Cinema commentary state
 let commentaryTimer = null;
-let commentaryElement = null;
+// Note: SplatDialogBox is used for all commentary display (initialized in main.js)
+
+// Helper to start commentary only once when ready (must be in watching phase)
+function maybeStartCommentary(instance, worldUrl) {
+    const state = instance?.stateData;
+    if (!state || state.commentaryStarted) return;
+    
+    // Only start commentary when actually laying down and watching
+    if (state.phase !== 'watching') {
+        console.log(`[${state.displayName}] maybeStartCommentary called but phase=${state.phase}, waiting...`);
+        return;
+    }
+    
+    console.log(`[${state.displayName}] Starting commentary (phase=watching)`);
+    startCommentaryTimer(instance, worldUrl);
+    state.commentaryStarted = true;
+}
 
 /**
  * Set VR mode state (call from main.js when entering/exiting VR)
@@ -170,9 +187,82 @@ function pickNextNode(graph, currentNodeId, previousNodeId, cinemaSpotId = null,
         // If previous node is the only option (after cinema filtering), backtrack is allowed
     }
     
+    // If in cinema mode and we have a cinema spot, prefer nodes closer to it
+    if (inCinemaMode && cinemaSpotId && candidates.length > 1) {
+        const cinemaNode = graph.get(cinemaSpotId);
+        if (cinemaNode) {
+            // Calculate distances to cinema spot for each candidate
+            const candidatesWithDistance = candidates.map(id => {
+                const node = graph.get(id);
+                if (!node) return { id, distance: Infinity };
+                const dx = node.position.x - cinemaNode.position.x;
+                const dz = node.position.z - cinemaNode.position.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                return { id, distance };
+            });
+            
+            // Sort by distance (closest first)
+            candidatesWithDistance.sort((a, b) => a.distance - b.distance);
+            
+            // If cinema spot is directly connected, always prefer it
+            if (candidates.includes(cinemaSpotId)) {
+                return cinemaSpotId;
+            }
+            
+            // Prefer the closest node, but with some randomness (70% chance for closest, 30% for others)
+            if (Math.random() < 0.7) {
+                return candidatesWithDistance[0].id;
+            } else {
+                // Pick randomly from top 3 closest
+                const topCandidates = candidatesWithDistance.slice(0, Math.min(3, candidatesWithDistance.length));
+                const randomIndex = Math.floor(Math.random() * topCandidates.length);
+                return topCandidates[randomIndex].id;
+            }
+        }
+    }
+    
     // Pick a random candidate
     const randomIndex = Math.floor(Math.random() * candidates.length);
     return candidates[randomIndex];
+}
+
+/**
+ * Find a shortest path in the waypoint graph (BFS). Assumes small graphs.
+ * @returns {string[]|null} Array of node ids from start -> goal (inclusive), or null if unreachable
+ */
+function findShortestPath(graph, startId, goalId) {
+    if (!graph.has(startId) || !graph.has(goalId)) return null;
+    if (startId === goalId) return [startId];
+
+    const queue = [startId];
+    const visited = new Set([startId]);
+    const parent = new Map();
+
+    while (queue.length > 0) {
+        const nodeId = queue.shift();
+        const node = graph.get(nodeId);
+        if (!node) continue;
+
+        // Treat edges as directed; most worlds define bidirectional edges explicitly.
+        for (const neighbor of node.edges) {
+            if (visited.has(neighbor)) continue;
+            visited.add(neighbor);
+            parent.set(neighbor, nodeId);
+            if (neighbor === goalId) {
+                // Reconstruct path
+                const path = [goalId];
+                let cur = nodeId;
+                while (cur) {
+                    path.unshift(cur);
+                    cur = parent.get(cur);
+                }
+                return path;
+            }
+            queue.push(neighbor);
+        }
+    }
+
+    return null;
 }
 
 // ============================================
@@ -192,6 +282,8 @@ function handleCinemaModeChange(instance, manager, isActive, worldUrl) {
         // Cinema mode started - walk to cinema spot (bed)
         state.inCinemaMode = true;
         isInCinemaMode = true;
+        state.cinemaPath = [];
+        state.commentaryStarted = false;
         
         // Remember where we were
         state.lastNodeBeforeCinema = state.currentNodeId;
@@ -202,26 +294,107 @@ function handleCinemaModeChange(instance, manager, isActive, worldUrl) {
         state.movieConfig = getFoundryMovieConfig(worldUrl);
         state.displayConfig = getFoundryDisplayConfig(worldUrl);
         console.log(`[${state.displayName}] Display config:`, state.displayConfig);
+        console.log(`[${state.displayName}] Movie config:`, state.movieConfig);
+        if (state.movieConfig?.title) {
+            console.log(`[${state.displayName}] Watching: "${state.movieConfig.title}"${state.movieConfig.year ? ` (${state.movieConfig.year})` : ''}`);
+        } else {
+            console.log(`[${state.displayName}] No movie info available yet (may load when connected to foundry)`);
+        }
         
-        // If we have a cinema spot, go there
+        // If we have a cinema spot, navigate to it via waypoints
         if (state.cinemaSpotId && state.graph.has(state.cinemaSpotId)) {
-            const cinemaNode = state.graph.get(state.cinemaSpotId);
-            state.targetNodeId = state.cinemaSpotId;
-            state.targetPosition = cinemaNode.position.clone();
+            // FIX: If Y-Bot was mid-walk when cinema mode activated, find the closest node
+            // to its current position to use as the starting point for pathfinding
+            const actualPos = state.controlledPosition || instance.model.position;
+            let closestNodeId = state.currentNodeId;
+            let closestDist = Infinity;
             
-            // Calculate rotation to face the target
-            const dx = state.targetPosition.x - state.controlledPosition.x;
-            const dz = state.targetPosition.z - state.controlledPosition.z;
-            state.targetRotation = Math.atan2(dx, dz);
-            
-            state.phase = 'turning';
-            
-            // Switch to walking animation
-            if (manager && instance.currentState !== YBotStates.WALKING) {
-                manager.transitionToState(instance, YBotStates.WALKING);
+            for (const [nodeId, node] of state.graph) {
+                const dx = node.position.x - actualPos.x;
+                const dz = node.position.z - actualPos.z;
+                const dist = Math.sqrt(dx * dx + dz * dz);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestNodeId = nodeId;
+                }
             }
             
-            console.log(`[${state.displayName}] Heading to cinema spot "${state.cinemaSpotId}"`);
+            // Update currentNodeId to the closest node
+            if (closestNodeId !== state.currentNodeId) {
+                console.log(`[${state.displayName}] Cinema mode: Adjusted starting node from "${state.currentNodeId}" to closest "${closestNodeId}" (dist=${closestDist.toFixed(2)})`);
+                state.currentNodeId = closestNodeId;
+            }
+            
+            // Check if already at cinema spot
+            if (state.currentNodeId === state.cinemaSpotId) {
+                // Already there - lay down immediately
+                state.phase = 'watching';
+                
+                // Rotate to face the screen
+                if (state.screenPosition && instance.model) {
+                    const dx = state.screenPosition.x - instance.model.position.x;
+                    const dz = state.screenPosition.z - instance.model.position.z;
+                    state.currentRotation = Math.atan2(dx, dz);
+                    instance.model.rotation.set(0, state.currentRotation, 0);
+                }
+                
+                if (manager && instance.currentState !== YBotStates.LAYING) {
+                    manager.transitionToState(instance, YBotStates.LAYING);
+                }
+                
+                console.log(`[${state.displayName}] Already at cinema spot - laying down`);
+                maybeStartCommentary(instance, worldUrl);
+            } else {
+            // Navigate to cinema spot via waypoints
+                // Compute shortest path in graph to cinema spot
+                const path = findShortestPath(state.graph, state.currentNodeId, state.cinemaSpotId);
+                if (path && path.length > 1) {
+                    // Drop current node, keep remaining path
+                    state.cinemaPath = path.slice(1);
+                    const nextNodeId = state.cinemaPath.shift();
+                    const nextNode = state.graph.get(nextNodeId);
+                    
+                    if (nextNode) {
+                        state.previousNodeId = state.currentNodeId;
+                        state.targetNodeId = nextNodeId;
+                        state.targetPosition = nextNode.position.clone();
+                        
+                        // Calculate rotation to face next waypoint
+                        const dx = state.targetPosition.x - state.controlledPosition.x;
+                        const dz = state.targetPosition.z - state.controlledPosition.z;
+                        state.targetRotation = Math.atan2(dx, dz);
+                        
+                        state.phase = 'turning';
+                        
+                        // Switch to walking animation
+                        if (manager && instance.currentState !== YBotStates.WALKING) {
+                            manager.transitionToState(instance, YBotStates.WALKING);
+                        }
+                        
+                        console.log(`[${state.displayName}] Cinema path computed -> dest: "${state.cinemaSpotId}", path: ${JSON.stringify(path)}`);
+                        console.log(`[${state.displayName}] Navigating via shortest path (next: "${nextNodeId}")`);
+                    }
+                } else {
+                    // No path found; fall back to a random neighbor (still in cinema mode biasing toward cinema spot)
+                    const nextNodeId = pickNextNode(state.graph, state.currentNodeId, state.previousNodeId, state.cinemaSpotId, true);
+                    const nextNode = state.graph.get(nextNodeId);
+                    if (nextNode) {
+                        state.previousNodeId = state.currentNodeId;
+                        state.targetNodeId = nextNodeId;
+                        state.targetPosition = nextNode.position.clone();
+                        
+                        const dx = state.targetPosition.x - state.controlledPosition.x;
+                        const dz = state.targetPosition.z - state.controlledPosition.z;
+                        state.targetRotation = Math.atan2(dx, dz);
+                        
+                        state.phase = 'turning';
+                        if (manager && instance.currentState !== YBotStates.WALKING) {
+                            manager.transitionToState(instance, YBotStates.WALKING);
+                        }
+                        console.log(`[${state.displayName}] No path found to "${state.cinemaSpotId}"; walking toward "${nextNodeId}"`);
+                    }
+                }
+            }
         } else {
             // No cinema spot - just lay down where we are
             state.phase = 'watching';
@@ -237,10 +410,9 @@ function handleCinemaModeChange(instance, manager, isActive, worldUrl) {
             if (manager && instance.currentState !== YBotStates.LAYING) {
                 manager.transitionToState(instance, YBotStates.LAYING);
             }
+            
+            maybeStartCommentary(instance, worldUrl);
         }
-        
-        // Start commentary timer
-        startCommentaryTimer(instance, worldUrl);
         
         // Create commentary display element
         createCommentaryDisplay();
@@ -249,6 +421,8 @@ function handleCinemaModeChange(instance, manager, isActive, worldUrl) {
         // Cinema mode ended - resume wandering
         state.inCinemaMode = false;
         isInCinemaMode = false;
+        state.cinemaPath = [];
+        state.commentaryStarted = false;
         
         // Stop commentary
         stopCommentaryTimer();
@@ -277,72 +451,43 @@ function handleCinemaModeChange(instance, manager, isActive, worldUrl) {
 }
 
 /**
- * Create the commentary display element below the screen
+ * Create the commentary display - now uses SplatDialogBox
+ * The old HTML overlay is no longer used.
  */
 function createCommentaryDisplay() {
-    if (commentaryElement) return;
-    
-    commentaryElement = document.createElement('div');
-    commentaryElement.id = 'ybot-commentary';
-    commentaryElement.style.cssText = `
-        position: fixed;
-        bottom: 15%;
-        left: 50%;
-        transform: translateX(-50%);
-        max-width: 60%;
-        padding: 12px 20px;
-        background: rgba(0, 0, 0, 0.8);
-        color: #fff;
-        font-family: 'Georgia', serif;
-        font-size: 16px;
-        font-style: italic;
-        border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        text-align: center;
-        z-index: 150;
-        opacity: 0;
-        transition: opacity 0.5s ease;
-        pointer-events: none;
-    `;
-    
-    document.body.appendChild(commentaryElement);
+    // SplatDialogBox is initialized in main.js and created on-demand
+    // No need to create anything here anymore
+    console.log('[Y-Bot] Commentary display ready (using SplatDialogBox)');
 }
 
 /**
- * Remove the commentary display element
+ * Remove the commentary display
  */
 function removeCommentaryDisplay() {
-    if (commentaryElement) {
-        commentaryElement.remove();
-        commentaryElement = null;
-    }
+    // SplatDialogBox handles its own cleanup via hideSplatCommentary
+    hideSplatCommentary();
 }
 
 /**
- * Show Y-Bot's commentary (works in both VR and non-VR)
+ * Show Y-Bot's commentary using SplatDialogBox (works in both VR and non-VR)
  * @param {string} text - Commentary text
- * @param {THREE.Vector3} screenPosition - Optional screen position for VR positioning
- * @param {THREE.Quaternion} screenRotation - Optional screen rotation for VR panel orientation
- * @param {Object} panelConfig - Optional VR panel config {width, height, offsetY, offsetZ}
+ * @param {THREE.Vector3} screenPosition - Screen position for dialog positioning
+ * @param {THREE.Quaternion} screenRotation - Screen rotation for dialog orientation
+ * @param {Object} panelConfig - Panel config {width, height, offsetY, offsetZ}
  */
-function showCommentary(text, screenPosition = null, screenRotation = null, panelConfig = null) {
-    // Show in VR if in VR mode
-    if (isInVRMode) {
-        showVRCommentary(text, CHARACTER_NAME, screenPosition, screenRotation, panelConfig);
+function showCommentary(text, screenPosition = null, screenRotation = null, panelConfig = null, instance = null) {
+    // Store comment in stateData for sync to viewers
+    if (instance?.stateData) {
+        instance.stateData.lastComment = text;
+        instance.stateData.lastCommentTime = Date.now();
+        // Also store positioning info for sync
+        instance.stateData.screenPosition = screenPosition;
+        instance.stateData.screenRotation = screenRotation;
+        instance.stateData.panelConfig = panelConfig;
     }
     
-    // Also show DOM overlay (for non-VR or as fallback)
-    if (commentaryElement) {
-        commentaryElement.textContent = `"${text}" — ${CHARACTER_NAME}`;
-        commentaryElement.style.opacity = '1';
-        
-        // Fade out after 8 seconds
-        setTimeout(() => {
-            if (commentaryElement) {
-                commentaryElement.style.opacity = '0';
-            }
-        }, 10000);
-    }
+    // Always use SplatDialogBox for 3D commentary display
+    showSplatCommentary(text, CHARACTER_NAME, screenPosition, screenRotation, panelConfig);
 }
 
 /**
@@ -353,6 +498,12 @@ function startCommentaryTimer(instance, worldUrl) {
     
     const state = instance?.stateData;
     if (!state) return;
+    
+    // Only start timer if in watching phase
+    if (state.phase !== 'watching') {
+        console.log(`[${state.displayName}] startCommentaryTimer called but phase=${state.phase}, aborting`);
+        return;
+    }
     
     // Check if commentary is enabled
     if (!state.commentaryEnabled) {
@@ -408,7 +559,17 @@ async function generateCommentary(instance, worldUrl) {
     const state = instance?.stateData;
     if (!state || !isInCinemaMode) return;
     
-    // Don't comment when movie is paused
+    // Only comment when actually watching (laying down at cinema spot)
+    if (state.phase !== 'watching') {
+        console.log(`[${state.displayName}] Not in watching phase (phase=${state.phase}), skipping commentary`);
+        return;
+    }
+    
+    // Don't comment when movie is not connected or paused
+    if (!isFoundryConnected(worldUrl)) {
+        console.log(`[${state.displayName}] Movie not connected, skipping commentary`);
+        return;
+    }
     if (isFoundryDisplayPaused(worldUrl)) {
         console.log(`[${state.displayName}] Movie paused, skipping commentary`);
         return;
@@ -436,13 +597,15 @@ async function generateCommentary(instance, worldUrl) {
             "I've seen this before, but it's still great.",
         ];
         const comment = genericComments[Math.floor(Math.random() * genericComments.length)];
-        showCommentary(comment, screenPosition, screenRotation, panelConfig);
+        showCommentary(comment, screenPosition, screenRotation, panelConfig, instance);
         return;
     }
     
     try {
         // Get AI commentary based on the frame using vision model
         const movieTitle = state.movieConfig?.title || null;
+        console.log(`[${state.displayName}] Requesting AI commentary for movie: "${movieTitle || 'Unknown'}"`);
+        
         const comment = await getVisionCommentary({
             characterName: state.displayName,
             imageDataUrl: frameDataUrl,
@@ -451,13 +614,13 @@ async function generateCommentary(instance, worldUrl) {
             botPrompt: state.botPrompt,
         });
         
-        showCommentary(comment, screenPosition, screenRotation, panelConfig);
+        showCommentary(comment, screenPosition, screenRotation, panelConfig, instance);
         console.log(`[${state.displayName}] Commentary: "${comment}"`);
         
     } catch (error) {
         console.error(`[${state.displayName}] Commentary error:`, error);
         // Fallback to generic comment on error
-        showCommentary("Hmm, interesting...", screenPosition, screenRotation, panelConfig);
+        showCommentary("Hmm, interesting...", screenPosition, screenRotation, panelConfig, instance);
     }
 }
 
@@ -630,7 +793,7 @@ export const YBotCharacter = {
     // Audio
     sounds: {
         heyThere: {
-            file: "/characters/ybot/hey-there.mp3",
+            file: "/characters/ybot/yes.mp3",
             refDistance: 5,
             rolloffFactor: 1,
             maxDistance: 50,
@@ -774,6 +937,8 @@ export const YBotCharacter = {
             inCinemaMode: false,   // Currently in cinema watching mode
             commentarySlug,        // BrainTrust slug for commentary
             lastNodeBeforeCinema: null,  // Remember where we were
+            cinemaPath: [],        // Planned path to cinema spot (sequence of node ids)
+            commentaryStarted: false, // Ensures commentary starts only when laying down
             // Commentary config
             commentaryEnabled: commentaryConfig.enabled ?? CINEMA_DEFAULTS.commentaryEnabled,
             commentIntervalMin: (commentaryConfig.intervalMinSec ?? 30) * 1000,  // Convert to ms
@@ -908,10 +1073,48 @@ export const YBotCharacter = {
         );
         const distanceToTarget = targetDir.length();
         
+        // SAFETY CHECK: Detect if we're walking away from target or walked too far
+        // Track initial distance when we start walking to a target
+        if (state.initialDistanceToTarget === undefined || state.targetNodeId !== state.lastTrackedTarget) {
+            state.initialDistanceToTarget = distanceToTarget;
+            state.lastTrackedTarget = state.targetNodeId;
+            state.totalWalkedDistance = 0;
+        }
+        
+        // If we've walked more than 50% past the initial distance, something is wrong
+        // OR if total walked distance exceeds safety limit
+        state.totalWalkedDistance = (state.totalWalkedDistance || 0) + MOVEMENT.speed * deltaTime;
+        const walkingAway = distanceToTarget > state.initialDistanceToTarget * 1.5;
+        const walkedTooFar = state.totalWalkedDistance > MOVEMENT.maxWalkDistance;
+        
+        if ((walkingAway || walkedTooFar) && distanceToTarget > MOVEMENT.arrivalDistance * 2) {
+            console.warn(`[${state.displayName}] SAFETY: Walking in wrong direction! dist=${distanceToTarget.toFixed(2)}, initial=${state.initialDistanceToTarget?.toFixed(2)}, walked=${state.totalWalkedDistance?.toFixed(2)}`);
+            console.warn(`[${state.displayName}] Recalculating rotation toward target "${state.targetNodeId}"`);
+            
+            // Recalculate rotation to actually face the target
+            const dx = state.targetPosition.x - state.controlledPosition.x;
+            const dz = state.targetPosition.z - state.controlledPosition.z;
+            state.targetRotation = Math.atan2(dx, dz);
+            state.currentRotation = state.targetRotation; // Snap rotation immediately
+            model.rotation.set(0, state.currentRotation, 0);
+            
+            // Reset tracking
+            state.initialDistanceToTarget = distanceToTarget;
+            state.totalWalkedDistance = 0;
+            
+            // Go back to turning phase to properly align
+            state.phase = 'turning';
+            return;
+        }
+        
         // Check if arrived at waypoint
         if (distanceToTarget < MOVEMENT.arrivalDistance) {
             // Update current node
             state.currentNodeId = state.targetNodeId;
+            
+            // Reset walking safety tracking
+            state.initialDistanceToTarget = undefined;
+            state.totalWalkedDistance = 0;
             
             // Check if we arrived at cinema spot during cinema mode
             if (state.inCinemaMode && state.currentNodeId === state.cinemaSpotId) {
@@ -939,12 +1142,14 @@ export const YBotCharacter = {
                     manager.transitionToState(instance, YBotStates.LAYING);
                 }
                 
+                maybeStartCommentary(instance, context.worldUrl);
                 console.log(`[${state.displayName}] Arrived at cinema spot - laying down to watch`);
                 return;
             }
             
             // Decide: pause or continue?
-            const shouldPause = Math.random() < MOVEMENT.idleChance;
+            // In cinema mode, never pause so we reach the cinema spot quickly
+            const shouldPause = state.inCinemaMode ? false : (Math.random() < MOVEMENT.idleChance);
             
             if (shouldPause) {
                 // Random pause
@@ -959,9 +1164,38 @@ export const YBotCharacter = {
                 
                 console.log(`[${state.displayName}] Pausing at "${state.currentNodeId}" for ${waitTime.toFixed(1)}s`);
             } else {
-                // Continue immediately - pick next destination (avoid backtracking and bed unless in cinema mode)
-                const nextNodeId = pickNextNode(state.graph, state.currentNodeId, state.previousNodeId, state.cinemaSpotId, state.inCinemaMode);
-                const nextNode = state.graph.get(nextNodeId);
+                // Continue immediately - pick next destination
+                let nextNodeId = null;
+                
+                // If in cinema mode and path is empty, recompute a shortest path from current position
+                if (state.inCinemaMode && state.currentNodeId !== state.cinemaSpotId) {
+                    if (!state.cinemaPath || state.cinemaPath.length === 0) {
+                        const path = findShortestPath(state.graph, state.currentNodeId, state.cinemaSpotId);
+                        if (path && path.length > 1) {
+                            state.cinemaPath = path.slice(1);
+                            console.log(`[${state.displayName}] Recomputed cinema path -> dest: "${state.cinemaSpotId}", path: ${JSON.stringify(path)}`);
+                        } else {
+                            console.log(`[${state.displayName}] Recompute failed: no path from "${state.currentNodeId}" to "${state.cinemaSpotId}"`);
+                        }
+                    }
+                }
+                
+                // If we have a planned cinema path, follow it
+                if (state.inCinemaMode && state.cinemaPath && state.cinemaPath.length > 0) {
+                    nextNodeId = state.cinemaPath.shift();
+                }
+                
+                // Otherwise pick next node (will bias toward cinema spot in cinema mode)
+                if (!nextNodeId) {
+                    nextNodeId = pickNextNode(state.graph, state.currentNodeId, state.previousNodeId, state.cinemaSpotId, state.inCinemaMode);
+                }
+                let nextNode = state.graph.get(nextNodeId);
+                
+                // Fallback if invalid
+                if (!nextNode) {
+                    nextNodeId = pickNextNode(state.graph, state.currentNodeId, state.previousNodeId, state.cinemaSpotId, state.inCinemaMode);
+                    nextNode = state.graph.get(nextNodeId);
+                }
                 
                 if (nextNode) {
                     state.previousNodeId = state.currentNodeId;

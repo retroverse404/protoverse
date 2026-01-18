@@ -19,6 +19,7 @@ let localName = null;
 let localColor = null;
 let reconnectTimer = null;
 let shouldReconnect = true;
+let pendingJoin = null; // Queue join request if WS not ready yet
 
 // Event listeners
 const listeners = {
@@ -37,6 +38,7 @@ const listeners = {
   onCharacterSync: new Set(),
   onFoundrySync: new Set(),
   onChat: new Set(),
+  onRequestFullState: new Set(),  // Server requests host to send full state to new viewer
 };
 
 /**
@@ -44,7 +46,8 @@ const listeners = {
  * @param {string} url - WebSocket server URL
  */
 export function initSessionManager(url) {
-  wsUrl = url || (import.meta.env?.VITE_WS_URL ?? "ws://localhost:8080");
+  wsUrl = url || "ws://localhost:8765";
+  console.log(`[SessionManager] Initializing with wsUrl: ${wsUrl}`);
   connect();
 }
 
@@ -57,8 +60,32 @@ function connect() {
   ws = new WebSocket(wsUrl);
   
   ws.onopen = () => {
-    console.log('[SessionManager] Connected to server');
+    console.log('[SessionManager] Connected to server, wsUrl:', wsUrl);
     emit('onOpen');
+    
+    // Execute pending join if there is one (user clicked join before WS was ready)
+    if (pendingJoin) {
+      console.log('[SessionManager] Found pending join, executing for session:', pendingJoin.sessionCode);
+      console.log('[SessionManager] pendingJoin data:', JSON.stringify(pendingJoin));
+      const { sessionCode: code, name, color } = pendingJoin;
+      pendingJoin = null;
+      
+      localName = name;
+      localColor = color;
+      sessionCode = code?.toUpperCase();
+      
+      const msg = {
+        type: 'join-session',
+        sessionCode,
+        name,
+        color,
+      };
+      console.log('[SessionManager] Sending pending join message:', JSON.stringify(msg));
+      ws.send(JSON.stringify(msg));
+      return; // Don't try to rejoin old session
+    } else {
+      console.log('[SessionManager] No pending join to execute');
+    }
     
     // Rejoin session if we were in one
     if (sessionCode && isHost && worldUrl) {
@@ -101,7 +128,13 @@ function connect() {
     try {
       msg = JSON.parse(ev.data);
     } catch {
+      console.warn('[SessionManager] Failed to parse message:', ev.data);
       return;
+    }
+    
+    // Log session-related messages for debugging
+    if (msg.type?.startsWith('session')) {
+      console.log(`[SessionManager] Received: ${msg.type}`, msg);
     }
     
     handleMessage(msg);
@@ -128,7 +161,8 @@ function handleMessage(msg) {
       worldUrl = msg.worldUrl;
       foundryUrl = msg.foundryUrl;
       isHost = false;
-      console.log(`[SessionManager] Joined session: ${sessionCode}`);
+      console.log(`[SessionManager] SUCCESS - Joined session: ${sessionCode}`);
+      console.log(`[SessionManager] Session details: worldUrl=${worldUrl}, foundryUrl=${foundryUrl}, isMoviePlaying=${msg.isMoviePlaying}`);
       emit('onSessionJoined', msg);
       break;
       
@@ -149,7 +183,14 @@ function handleMessage(msg) {
       
     case 'session-error':
       console.error(`[SessionManager] Error: ${msg.error}`);
+      pendingJoin = null; // Clear any pending join on error
       emit('onSessionError', msg);
+      break;
+      
+    case 'debug-sessions-response':
+      console.log('[SessionManager] Debug - Active Sessions on Server:');
+      console.table(msg.sessions);
+      console.log(`[SessionManager] Total sessions: ${msg.totalSessions}`);
       break;
       
     case 'peers':
@@ -182,6 +223,12 @@ function handleMessage(msg) {
       
     case 'chat':
       emit('onChat', msg);
+      break;
+      
+    case 'request-full-state':
+      // Server is asking host to send full state (new viewer joined)
+      console.log(`[SessionManager] Server requested full state for viewer: ${msg.viewerName}`);
+      emit('onRequestFullState', msg);
       break;
   }
 }
@@ -271,6 +318,8 @@ export function createSession({ worldUrl: world, foundryUrl: foundry, name, colo
   foundryUrl = foundry;
   maxViewers = max || 8;
   
+  console.log(`[SessionManager] Creating session: world="${world}", wsUrl=${wsUrl}`);
+  
   ws.send(JSON.stringify({
     type: 'create-session',
     worldUrl: world,
@@ -291,21 +340,39 @@ export function createSession({ worldUrl: world, foundryUrl: foundry, name, colo
  * @param {number} options.color - Viewer color
  */
 export function joinSession({ sessionCode: code, name, color }) {
+  const wsState = ws ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][ws.readyState] : 'NULL';
+  console.log(`[SessionManager] joinSession called: code="${code}", wsState=${wsState}, wsUrl=${wsUrl}`);
+  
+  // If not connected yet, queue the join for when connection opens
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    console.error('[SessionManager] Not connected');
-    return false;
+    console.log('[SessionManager] Not connected yet, queuing join for session:', code);
+    console.log(`[SessionManager] pendingJoin set to:`, { sessionCode: code, name, color });
+    pendingJoin = { sessionCode: code, name, color };
+    
+    // If WS doesn't exist or is closed, try to connect
+    if (!ws || ws.readyState === WebSocket.CLOSED) {
+      console.log('[SessionManager] WS is null or closed, initiating connect()');
+      connect();
+    } else {
+      console.log('[SessionManager] WS is connecting, waiting for onopen');
+    }
+    return true; // Return true since we queued it
   }
   
   localName = name;
   localColor = color;
   sessionCode = code?.toUpperCase();
   
-  ws.send(JSON.stringify({
+  console.log(`[SessionManager] Sending join-session: code="${sessionCode}" (original: "${code}")`);
+  
+  const msg = {
     type: 'join-session',
     sessionCode,
     name,
     color,
-  }));
+  };
+  console.log('[SessionManager] Sending message:', JSON.stringify(msg));
+  ws.send(JSON.stringify(msg));
   
   return true;
 }
@@ -316,11 +383,20 @@ export function joinSession({ sessionCode: code, name, color }) {
 export function leaveSession() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   
+  const wasInSession = !!sessionCode;
+  const oldSessionCode = sessionCode;
+  
   ws.send(JSON.stringify({ type: 'leave-session' }));
   sessionCode = null;
   isHost = false;
   hostInfo = null;
   viewers = [];
+  worldUrl = null; // Clear world so we don't see anything
+  
+  // Emit session ended so multiplayer clears all peers
+  if (wasInSession) {
+    emit('onSessionEnded', { sessionCode: oldSessionCode, reason: 'You left the session' });
+  }
 }
 
 /**
@@ -428,6 +504,7 @@ export function onPlaybackSync(fn) { listeners.onPlaybackSync.add(fn); return ()
 export function onCharacterSync(fn) { listeners.onCharacterSync.add(fn); return () => listeners.onCharacterSync.delete(fn); }
 export function onFoundrySync(fn) { listeners.onFoundrySync.add(fn); return () => listeners.onFoundrySync.delete(fn); }
 export function onChat(fn) { listeners.onChat.add(fn); return () => listeners.onChat.delete(fn); }
+export function onRequestFullState(fn) { listeners.onRequestFullState.add(fn); return () => listeners.onRequestFullState.delete(fn); }
 
 // ============ GETTERS ============
 
@@ -437,6 +514,35 @@ export function inSession() { return !!sessionCode; }
 export function getWorldUrl() { return worldUrl; }
 export function getFoundryUrl() { return foundryUrl; }
 export function getHostInfo() { return hostInfo; }
+
+/**
+ * Debug: Request list of active sessions from server
+ */
+export function debugListSessions() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.log('[SessionManager] Debug: Not connected to server');
+    return;
+  }
+  console.log('[SessionManager] Debug: Requesting session list from server...');
+  ws.send(JSON.stringify({ type: 'debug-sessions' }));
+}
+
+/**
+ * Debug: Get current client state
+ */
+export function debugClientState() {
+  const wsState = ws ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][ws.readyState] : 'NULL';
+  console.log('[SessionManager] Debug - Client State:');
+  console.log('  wsUrl:', wsUrl);
+  console.log('  wsState:', wsState);
+  console.log('  sessionCode:', sessionCode);
+  console.log('  isHost:', isHost);
+  console.log('  worldUrl:', worldUrl);
+  console.log('  foundryUrl:', foundryUrl);
+  console.log('  pendingJoin:', pendingJoin);
+  console.log('  localName:', localName);
+  return { wsUrl, wsState, sessionCode, isHost, worldUrl, foundryUrl, pendingJoin, localName };
+}
 export function getViewers() { return viewers; }
 export function getMaxViewers() { return maxViewers; }
 export function getLocalName() { return localName; }

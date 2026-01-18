@@ -25,6 +25,11 @@ export class ProtoverseMultiplayer {
     this.localColor = randomColor();
     this.localName = null;
     this._unsubscribers = [];
+    
+    // Store last known state for immediate sends
+    this._lastPosition = null;
+    this._lastQuaternion = null;
+    this._lastMeta = null;
 
     this._attachHandlers();
   }
@@ -69,37 +74,61 @@ export class ProtoverseMultiplayer {
         this._clearAllPeers();
       })
     );
+    
+    // Host receives request to send full state when new viewer joins
+    this._unsubscribers.push(
+      SessionManager.onRequestFullState((msg) => {
+        if (SessionManager.isHosting() && this._lastPosition && this._lastQuaternion) {
+          console.log(`[Multiplayer] Sending full state to new viewer: ${msg.viewerName}`);
+          // Send current position immediately
+          SessionManager.sendState(this._lastPosition, this._lastQuaternion, { 
+            ...this._lastMeta, 
+            color: this.localColor,
+            name: this.localName,
+          });
+        }
+      })
+    );
   }
 
   _ensurePeer(id, name, colorHint, isHost = false) {
     if (this.peers.has(id)) {
-      // Update existing peer's color if changed
+      // Update existing peer
       const peer = this.peers.get(id);
       if (colorHint && peer.color !== colorHint) {
         peer.color = colorHint;
         // Note: GhostAvatar doesn't support color changes after creation
         // Would need to recreate the avatar for color changes
       }
+      // Update name if changed
+      if (name && name !== peer.name) {
+        peer.name = name;
+        peer.avatar?.setName?.(name);
+        peer.mesh.userData.name = name;
+      }
       return peer;
     }
     
     const color = colorHint ?? randomColor();
+    const displayName = name || `Player ${id.slice(-4)}`;
     const avatar = new GhostAvatar({ 
       baseColor: color,
       radius: 0.25, // Slightly larger for visibility
       splatCount: 400,
       opacity: 0.9,
+      name: displayName, // Show name above avatar
+      showEyes: true,    // Show eyes for direction
     });
     const mesh = avatar.getObject();
-    mesh.userData.name = name || id;
+    mesh.userData.name = displayName;
     mesh.userData.peerId = id;
     mesh.userData.isHost = isHost;
     this.scene.add(mesh);
     
-    const entry = { mesh, color, avatar, name: name || id, isHost };
+    const entry = { mesh, color, avatar, name: displayName, isHost };
     this.peers.set(id, entry);
     
-    console.log(`[Multiplayer] Added peer: ${name || id} (${isHost ? 'host' : 'viewer'})`);
+    console.log(`[Multiplayer] Added peer: ${displayName} (${isHost ? 'host' : 'viewer'})`);
     
     return entry;
   }
@@ -111,7 +140,7 @@ export class ProtoverseMultiplayer {
     console.log(`[Multiplayer] Removed peer: ${entry.name}`);
     
     this.scene.remove(entry.mesh);
-    entry.avatar?.mesh?.dispose?.();
+    entry.avatar?.dispose?.();
     this.peers.delete(id);
   }
 
@@ -164,6 +193,11 @@ export class ProtoverseMultiplayer {
   update(timeMs, positionArray, quaternionArray, meta) {
     const deltaMs = timeMs - this._lastTime;
     this._lastTime = timeMs;
+    
+    // Store last known state for immediate sends (e.g., when new viewer joins)
+    this._lastPosition = positionArray;
+    this._lastQuaternion = quaternionArray;
+    this._lastMeta = meta;
 
     // Animate all peer avatars every frame
     for (const entry of this.peers.values()) {

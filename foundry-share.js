@@ -377,6 +377,9 @@ class FoundryDisplay {
         this._restartOnConnect = options.restart || false;
         
         try {
+            // Reset frame size so first frame triggers proper canvas/texture setup
+            this.frameSize = { w: 0, h: 0 };
+            
             // Create offscreen canvas for rendering frames
             this.frameCanvas = document.createElement('canvas');
             this.frameCanvas.width = 1920;
@@ -447,7 +450,7 @@ class FoundryDisplay {
      * Open WebSocket connection
      */
     _openSocket() {
-        // Support URL override for ngrok/remote testing
+        // Support URL override for remote servers (Fly.io, etc.)
         const wsUrl = window.FOUNDRY_URL_OVERRIDE || this.config.wsUrl;
         console.log(`[Foundry] "${this.config.name}" connecting to: ${wsUrl}`);
         const socket = new WebSocket(wsUrl);
@@ -464,6 +467,9 @@ class FoundryDisplay {
             // Enable ambient glow when connected
             this._setAmbientGlowVisible(true);
             
+            // Fetch movie info from foundry-player
+            this._fetchMovieInfo(wsUrl);
+            
             // Request video mode
             this._sendJson({ type: "mode", mode: "video", codec: REQUESTED_CODEC });
             
@@ -476,7 +482,7 @@ class FoundryDisplay {
             
             // Request keyframe with retries to handle network latency
             this._requestKeyframe("socket-open");
-            // Additional requests with delays for high-latency connections (ngrok, etc.)
+            // Additional requests with delays for high-latency connections
             setTimeout(() => this._requestKeyframe("socket-open-retry-1"), 200);
             setTimeout(() => this._requestKeyframe("socket-open-retry-2"), 500);
         };
@@ -739,6 +745,53 @@ class FoundryDisplay {
             return true;
         }
         return false;
+    }
+    
+    /**
+     * Fetch movie info from foundry-player's /movie-info endpoint
+     * @param {string} wsUrl - WebSocket URL to derive HTTP URL from
+     */
+    async _fetchMovieInfo(wsUrl) {
+        try {
+            // Convert WebSocket URL to HTTP URL
+            // wss://host:port/ws -> https://host:port/movie-info
+            // ws://host:port/ws -> http://host:port/movie-info
+            let httpUrl = wsUrl
+                .replace(/^wss:/, 'https:')
+                .replace(/^ws:/, 'http:')
+                .replace(/\/ws$/, '/movie-info');
+            
+            console.log(`[Foundry] "${this.config.name}" fetching movie info from: ${httpUrl}`);
+            
+            const response = await fetch(httpUrl);
+            if (response.ok) {
+                const text = await response.text();
+                console.log(`[Foundry] "${this.config.name}" raw movie info response:`, text);
+                
+                try {
+                    this.movieInfo = JSON.parse(text);
+                    console.log(`[Foundry] "${this.config.name}" ✓ movie info loaded:`);
+                    console.log(`[Foundry]   title: "${this.movieInfo.title || '(none)'}"`);
+                    console.log(`[Foundry]   description: "${(this.movieInfo.description || '(none)').substring(0, 50)}${(this.movieInfo.description?.length > 50) ? '...' : ''}"`);
+                    console.log(`[Foundry]   year: ${this.movieInfo.year || '(none)'}`);
+                } catch (parseError) {
+                    console.error(`[Foundry] "${this.config.name}" failed to parse movie info JSON:`, parseError.message);
+                    console.error(`[Foundry]   raw response was:`, text.substring(0, 200));
+                    this.movieInfo = null;
+                }
+            } else {
+                const errorText = await response.text().catch(() => '(no body)');
+                console.warn(`[Foundry] "${this.config.name}" movie info not available:`);
+                console.warn(`[Foundry]   status: ${response.status} ${response.statusText}`);
+                console.warn(`[Foundry]   body: ${errorText.substring(0, 200)}`);
+                this.movieInfo = null;
+            }
+        } catch (error) {
+            console.warn(`[Foundry] "${this.config.name}" failed to fetch movie info:`);
+            console.warn(`[Foundry]   error: ${error.message}`);
+            console.warn(`[Foundry]   this may happen if foundry-player doesn't have /movie-info endpoint (needs redeploy)`);
+            this.movieInfo = null;
+        }
     }
     
     /**
@@ -1380,13 +1433,15 @@ export function getFoundryScreenRotation(worldUrl, identifier = 0) {
 
 /**
  * Get the movie config from a Foundry display
+ * Returns movie info fetched from foundry-player's /movie-info endpoint
  * @param {string} worldUrl - World URL to get display from
  * @param {number|string} identifier - Display index or name
- * @returns {Object|null} - Movie config {title, description} or null if not found
+ * @returns {Object|null} - Movie config {title, description, year} or null if not found
  */
 export function getFoundryMovieConfig(worldUrl, identifier = 0) {
     const displays = worldFoundryDisplays.get(worldUrl);
     if (!displays || displays.length === 0) {
+        console.log(`[Foundry] getFoundryMovieConfig: no displays for worldUrl=${worldUrl}`);
         return null;
     }
     
@@ -1397,7 +1452,22 @@ export function getFoundryMovieConfig(worldUrl, identifier = 0) {
         display = displays.find(d => d.config.name === identifier);
     }
     
-    return display?.config?.movie || null;
+    if (!display) {
+        console.log(`[Foundry] getFoundryMovieConfig: display not found (identifier=${identifier})`);
+        return null;
+    }
+    
+    // Return movie info fetched from foundry-player (preferred) or fall back to static config
+    if (display.movieInfo) {
+        console.log(`[Foundry] getFoundryMovieConfig: using fetched movieInfo - title="${display.movieInfo.title}"`);
+        return display.movieInfo;
+    } else if (display.config?.movie) {
+        console.log(`[Foundry] getFoundryMovieConfig: using static config.movie - title="${display.config.movie.title}"`);
+        return display.config.movie;
+    } else {
+        console.log(`[Foundry] getFoundryMovieConfig: no movie info available for display "${display.config?.name}"`);
+        return null;
+    }
 }
 
 /**

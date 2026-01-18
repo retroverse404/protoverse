@@ -4,7 +4,7 @@ This document is designed for AI assistants working on this codebase. It explain
 
 ## Project Overview
 
-ProtoVerse is a WebXR-enabled 3D world explorer built with Three.js and Gaussian Splatting. Users can navigate through interconnected worlds via portals, interact with animated characters, and experience physics-based movement.
+ProtoVerse is a WebXR-enabled 3D world explorer built with Three.js and Gaussian Splatting. Users can navigate through interconnected worlds via portals, interact with animated characters, watch synchronized movies, and experience physics-based movement in multiplayer VR.
 
 **Key Technologies:**
 - **Three.js** - 3D rendering
@@ -12,6 +12,8 @@ ProtoVerse is a WebXR-enabled 3D world explorer built with Three.js and Gaussian
 - **Rapier.js** - Physics engine
 - **Vite** - Build tool
 - **WebXR** - VR support (Quest 3 tested)
+- **Convex** - Real-time backend for session tracking
+- **Fly.io** - Cinema backend hosting (streaming + multiplayer)
 
 ---
 
@@ -41,6 +43,23 @@ ProtoVerse is a WebXR-enabled 3D world explorer built with Three.js and Gaussian
               - SparkPortals (portal rendering)
               - SparkXr (VR support)
               - SparkControls (camera movement)
+              - textSplats (3D text rendering)
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    Multiplayer System                            │
+├─────────────────────────────────────────────────────────────────┤
+│  multiplayer/session-manager.js  ←→  Fly.io WS Server           │
+│  multiplayer/multiplayer.js      ←→  Peer avatar sync           │
+│  multiplayer/character-sync.js   ←→  NPC state broadcast        │
+│  multiplayer/host-controls.js    ←→  Session UI                 │
+└─────────────────────────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Convex (Session Registry)                     │
+│  convex/sessions.ts - Session CRUD, heartbeats                  │
+│  public/lobby/index.html - Real-time session browser            │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -60,13 +79,17 @@ ProtoVerse is a WebXR-enabled 3D world explorer built with Three.js and Gaussian
   "position": [x, y, z],
   "rotation": [qx, qy, qz, qw],
   "portals": [...],
-  "characters": [...]
+  "characters": [...],
+  "foundryDisplays": [...],
+  "waypointGraph": [...]
 }
 ```
 
 - **splatUrl**: Gaussian splat file (.spz format)
 - **collisionUrl**: GLB mesh for physics collisions
 - **position/rotation**: Camera starting position in this world
+- **foundryDisplays**: Video streaming screens (see Foundry section)
+- **waypointGraph**: NPC navigation paths
 
 ### 2. WorldNo System
 
@@ -136,35 +159,35 @@ export const MyCharacter = {
   "scale": 0.01,
   "waypointGraph": [
     { "id": "start", "pos": [x,y,z], "edges": ["waypoint2"] },
-    { "id": "waypoint2", "pos": [x,y,z], "edges": ["start", "waypoint3"] }
+    { "id": "waypoint2", "pos": [x,y,z], "edges": ["start", "waypoint3"], "isCinemaSpot": true }
   ]
 }
 ```
 
 ### 6. Waypoint Graph System
 
-Characters like Amy use a DAG (Directed Acyclic Graph) for natural wandering:
+Characters like Y-Bot use a DAG (Directed Acyclic Graph) for natural wandering:
 
 ```javascript
 // In world.json, define waypointGraph per character instance
 "waypointGraph": [
   { "id": "start", "pos": [-7.86, 4.99, 6.05], "edges": ["door"] },
   { "id": "door", "pos": [-7.86, 4.99, 1.05], "edges": ["start", "hallway"] },
-  ...
+  { "id": "theater-rug", "pos": [...], "edges": [...], "isCinemaSpot": true }
 ]
 ```
 
 **Behavior:**
 - At each node, pick random edge (excluding previous node to avoid backtracking)
 - 20% chance to pause at a node (1-5 seconds)
-- Never backtracks unless it's the only option
-- See `amy.js` for implementation: `buildWaypointGraph()`, `pickRandomNextNode()`
+- `isCinemaSpot: true` marks where the character goes in cinema mode
+- Safety checks prevent characters from walking off into space
 
 ### 7. Foundry Streaming
 
-Foundry is a custom Rust server for screen/audio streaming (replaces VNC).
+Foundry is a custom Rust server for video streaming (H.264 over WebSocket).
 
-**Server**: `~/projects/foundry/` - Rust application using xcap + OpenH264
+**Server**: `~/projects/foundry/foundry-player/` - Rust application
 **Client**: `foundry-share.js` + `public/foundry-worker.js`
 
 ```json
@@ -172,34 +195,139 @@ Foundry is a custom Rust server for screen/audio streaming (replaces VNC).
 "foundryDisplays": [
   {
     "name": "Screen Share",
-    "wsUrl": "ws://localhost:23646/ws",
+    "wsUrl": "wss://protoverse-bigtrouble.fly.dev/ws",
     "position": [-13.33, 6.5, -0.06],
     "width": 3.5,
-    "aspectRatio": 1.777
+    "aspectRatio": 1.777,
+    "vrCommentaryPanel": {
+      "offsetX": 0,
+      "offsetY": -1.0,
+      "offsetZ": 0.3,
+      "width": 5.4
+    }
   }
 ]
 ```
 
-See `docs/foundry-streaming.md` for full setup instructions.
+The `vrCommentaryPanel` configures where Y-Bot's movie commentary appears (subtitle-style at bottom of screen).
 
 ### 8. AI Chat System
 
-Characters can have AI-powered conversations using Braintrust.
+Characters can have AI-powered conversations using Braintrust, proxied through Convex for security.
 
 **Desktop**: `chat-ui.js` - 2D overlay chat window
 **VR**: `vr-chat.js` + `vr-keyboard.js` + `vr-chat-panel.js` - 3D keyboard/panel
 
+**Prompts**: Stored in `prompts/` directory, synced with Braintrust via CLI:
+```bash
+npx braintrust push --project-name "protoverse" prompts/
+```
+
 **Configuration:**
 - `config.js`: `ai.enabled`, `ai.projectName`
 - Character: `CHAT.promptSlug` for Braintrust prompt ID
-- Environment: `VITE_BRAINTRUST_API_KEY`
+- Convex: `BRAINTRUST_API_KEY` environment variable (server-side, secure)
+
+**Architecture:**
+```
+Browser (ai/bt.js) → Convex (/ai/invoke, /ai/stream) → Braintrust API
+                         ↑                                    ↑
+                    API key stored here              prompts/ synced here
+```
 
 **Flow:**
 1. Player approaches character → `onProximityEnter`
 2. `stopPlayerMovement()` halts player
 3. `showChat()` (desktop) or `startVRChat()` (VR)
-4. User types → `getChatResponse()` → Braintrust streaming
+4. User types → `getChatResponse()` → Convex proxy → Braintrust streaming
 5. Response appears via `startStreamingMessage()` / `appendToStreamingMessage()`
+
+### 9. Multiplayer System
+
+Real-time multiplayer with host/viewer model:
+
+**Components:**
+- `multiplayer/session-manager.js` - WebSocket client, session state
+- `multiplayer/multiplayer.js` - Peer avatar rendering
+- `multiplayer/character-sync.js` - NPC state broadcast (host → viewers)
+- `multiplayer/host-controls.js` - Session creation UI
+- `multiplayer/ws-server.js` - Server (runs on Fly.io)
+
+**Session Flow:**
+1. Host creates session → gets 6-char code (e.g., `HYG2CQ`)
+2. Session registered with Convex for discovery
+3. Host shares URL with `?session=CODE&ws=...&foundry=...`
+4. Viewers join via URL → auto-join if `session` param present
+5. Host broadcasts: position, rotation, movie state, NPC state
+6. Viewers receive updates, render peer avatars
+
+**Key Events:**
+- `session-created` / `session-joined` / `session-error`
+- `state-update` - Player position/rotation
+- `character-state` - NPC sync (position, animation, commentary)
+- `foundry-state` - Movie playback state
+- `request-full-state` - Viewer requests immediate sync on join
+
+### 10. Splat Dialog Box (VR Commentary)
+
+3D text rendering using SparkJS `textSplats` for movie commentary:
+
+```javascript
+import { showSplatCommentary, hideSplatCommentary } from './splat-dialog-box.js';
+
+// Show commentary at screen position
+showSplatCommentary(
+  "Great scene!", 
+  "Y-Bot",
+  screenPosition,    // THREE.Vector3
+  screenRotation,    // THREE.Quaternion (optional)
+  { offsetY: -1.0, offsetZ: 0.3 }  // Position offsets
+);
+```
+
+- Uses splat-based text that composes well with Gaussian splats
+- Positioned relative to Foundry display (subtitle-style)
+- Has outline effect for readability against movie backgrounds
+
+### 11. Convex Integration
+
+Convex provides two services:
+1. **Session Registry** - Real-time session tracking for multiplayer lobby
+2. **AI Proxy** - Secure proxy for Braintrust API calls (keeps API key server-side)
+
+**Schema** (`convex/schema.ts`):
+```typescript
+sessions: defineTable({
+  code: v.string(),
+  hostName: v.string(),
+  movieTitle: v.string(),
+  flyApp: v.string(),
+  wsUrl: v.string(),
+  foundryUrl: v.string(),
+  viewerCount: v.number(),
+  maxViewers: v.number(),
+  lastHeartbeat: v.number(),
+})
+```
+
+**Functions** (`convex/sessions.ts`):
+- `registerSession` - Create/update session
+- `heartbeat` - Keep session alive
+- `endSession` - Remove session
+- `listActiveSessions` - Query all active sessions
+
+**HTTP Actions** (`convex/http.ts`):
+- `POST /session/register` - Register new session
+- `POST /session/heartbeat` - Keep session alive
+- `POST /session/end` - End session
+- `GET /sessions` - List active sessions
+- `POST /ai/invoke` - Proxy Braintrust call (non-streaming)
+- `POST /ai/stream` - Proxy Braintrust call (streaming)
+
+**Environment Variables** (set in Convex dashboard):
+- `BRAINTRUST_API_KEY` - Braintrust API key for AI chat
+
+WS server calls session endpoints via `CONVEX_HTTP_URL` environment variable.
 
 ---
 
@@ -215,10 +343,11 @@ Characters can have AI-powered conversations using Braintrust.
 | `world-state.js` | `WorldState` - Per-world runtime state |
 | `character-manager.js` | `CharacterManager` - NPC spawning, animation, state machine |
 | `characters/index.js` | Character registry |
+| `characters/ybot.js` | Y-Bot character with cinema mode + AI commentary |
 | `physics.js` | Rapier physics integration, `stopPlayerMovement()` |
 | `physics-config.js` | Physics parameters (thrust, bounce, drag) |
 | `controls.js` | Input handling (keyboard, mouse, VR controllers) |
-| `hud.js` | UI elements (FPS, buttons, orientation display) |
+| `hud.js` | UI elements (FPS, buttons, movie controls) |
 | `loading.js` | Loading progress bar |
 | `audio.js` | Background audio management |
 | `spatial-audio.js` | Positional audio sources from world.json |
@@ -228,14 +357,78 @@ Characters can have AI-powered conversations using Braintrust.
 | **Streaming** | |
 | `foundry-share.js` | Foundry video/audio streaming client |
 | `public/foundry-worker.js` | WebCodecs H.264 decoder worker |
+| `splat-dialog-box.js` | 3D splat-based text for VR commentary |
 | **AI Chat** | |
 | `chat-ui.js` | Desktop 2D chat interface |
 | `ai/chat-provider.js` | Chat response abstraction (AI or stock) |
-| `ai/bt.js` | Braintrust API integration |
+| `ai/bt.js` | Braintrust API integration (via Convex proxy) |
+| `prompts/` | Braintrust prompts (synced via `npx braintrust push`) |
 | **VR Chat** | |
 | `vr-chat.js` | VR chat system orchestrator |
 | `vr-keyboard.js` | 3D virtual keyboard for VR |
 | `vr-chat-panel.js` | 3D chat message display panel |
+| **Multiplayer** | |
+| `multiplayer/session-manager.js` | WebSocket client, session state |
+| `multiplayer/multiplayer.js` | Peer avatar rendering |
+| `multiplayer/avatar.js` | GhostAvatar - procedural splat avatars |
+| `multiplayer/character-sync.js` | NPC state broadcast |
+| `multiplayer/host-controls.js` | Session creation UI |
+| `multiplayer/ws-server.js` | WebSocket server (for Fly.io) |
+| `multiplayer/multiplayer-panel.js` | HUD panel for multiplayer info |
+| **Convex** | |
+| `convex/schema.ts` | Database schema |
+| `convex/sessions.ts` | Session CRUD functions |
+| `convex/http.ts` | HTTP endpoints for WS server + AI proxy |
+| `convex/ai.ts` | Braintrust API proxy (keeps API key server-side) |
+| `convex/crons.ts` | Scheduled cleanup jobs |
+| `public/lobby/index.html` | Session browser UI |
+
+---
+
+## Cinema Deployment
+
+The `cinema/` directory contains everything for deploying movie theaters:
+
+```
+cinema/
+├── deploy.sh              # Build & deploy Fly.io backend
+├── theater-deploy.sh      # Full deployment (CDN + Fly + Netlify)
+├── list-theaters.sh       # List deployed Fly.io instances
+├── start-backend.sh       # Local backend for development
+├── setup-local-vr.sh      # ADB port forwarding for Quest
+├── fly.template.toml      # Fly.io config template
+├── Dockerfile.cinema      # Docker image for cinema backend (Rust + Node)
+├── entrypoint.sh          # Container startup script
+├── <movie>/               # Per-movie directories
+│   ├── metadata.json      # Movie title, description
+│   └── movie/
+│       └── movie.mp4
+└── README.md
+```
+
+**Deploy a new movie:**
+```bash
+# Full deployment (uploads CDN, builds Fly, deploys Netlify)
+./cinema/theater-deploy.sh bigtrouble
+
+# Or just the Fly.io backend
+./cinema/deploy.sh bigtrouble --app-name protoverse-bigtrouble
+```
+
+**Movie metadata** (`cinema/<movie>/metadata.json`):
+```json
+{
+  "title": "Big Trouble in Little China",
+  "description": "Jack Burton and the Pork Chop Express find trouble",
+  "year": 1986
+}
+```
+
+**Runtime configuration** (Fly.io secrets):
+```bash
+# Set movie start time without redeploying
+fly secrets set START_TIME=3600 -a protoverse-bigtrouble
+```
 
 ---
 
@@ -286,6 +479,22 @@ onUpdate: (instance, deltaTime, context) => {
 }
 ```
 
+### Broadcasting Character State (Multiplayer)
+
+```javascript
+// In character onUpdate (host only):
+if (window.characterSyncBroadcast && isHost) {
+    window.characterSyncBroadcast(instance.definition.id, {
+        position: model.position.toArray(),
+        rotation: [model.quaternion.x, model.quaternion.y, model.quaternion.z, model.quaternion.w],
+        animation: instance.currentState,
+        comment: state.currentComment,
+        screenPosition: state.screenPosition?.toArray(),
+        screenRotation: state.screenRotation ? [state.screenRotation.x, ...] : null,
+    });
+}
+```
+
 ---
 
 ## Common Gotchas & Lessons Learned
@@ -328,14 +537,6 @@ sounds: {
         positional: false,  // Disable spatialization
     }
 }
-```
-
-Or use simpler settings:
-```javascript
-audio.setDistanceModel('linear');
-audio.setRolloffFactor(1);
-audio.setRefDistance(5);
-audio.setMaxDistance(50);
 ```
 
 ### 5. Scene Traversal is Expensive
@@ -399,6 +600,32 @@ In `character-manager.js`, the order is:
 5. Call `onSpawn`
 6. Start initial animation
 
+### 11. Multiplayer State Serialization
+
+When syncing THREE.js objects over WebSocket, convert to arrays:
+```javascript
+// Sending:
+position: model.position.toArray(),
+rotation: [q.x, q.y, q.z, q.w],
+
+// Receiving (in character-sync.js):
+const pos = new THREE.Vector3().fromArray(charState.position);
+const rot = new THREE.Quaternion().fromArray(charState.rotation);
+```
+
+### 12. Fly.io Single Machine Requirement
+
+For multiplayer sessions to work correctly, Fly.io must run only ONE machine (in-memory session state):
+```toml
+# fly.template.toml
+[http_service]
+  max_machines_running = 1
+```
+
+### 13. VR Commentary Needs 3D Splat Text
+
+Canvas-texture-based text doesn't compose well with Gaussian splats in VR. Use `SplatDialogBox` with `textSplats` for readable commentary.
+
 ---
 
 ## Configuration System
@@ -426,6 +653,7 @@ setConfig('debug.showFps', true);
 - `multiplayer` - WebSocket config
 - `audio` - Default state, volumes
 - `debug` - FPS, logging, physics toggle
+- `ai` - Enabled, project name
 
 ---
 
@@ -459,26 +687,56 @@ setConfig('debug.showFps', true);
 
 ---
 
-## Testing
+## Testing & Development
 
-- **Local dev**: `npm run dev` (Vite dev server)
-- **VR testing**: Use Quest 3 browser, connect to dev server on local network
+- **Local frontend**: `npm run dev` (Vite dev server)
+- **Local backend**: `./cinema/start-backend.sh <movie>` (WS server + Foundry)
+- **VR testing**: Quest 3 browser → `http://<local-ip>:3000`
+- **VR USB debugging**: `./cinema/setup-local-vr.sh` (ADB port forwarding)
 - **Collision mesh editing**: `tools/collision-editor.html`
 - **Physics tuning**: Adjust `physics-config.js`
+
+**Debugging:**
+```javascript
+// In browser console:
+debugSessionState()  // Show current session info
+debugSessions()      // Query server for all sessions
+```
 
 ---
 
 ## Deployment
 
-- **Netlify**: Configured via `netlify.toml`
-- **Assets**: Splats (.spz) served from Tigris CDN, not bundled
-- **Build**: `npm run build` - excludes `public/worlds/` from bundle
+See `docs/deployment-guide.md` for comprehensive instructions.
+
+**Quick Overview:**
+
+| Component | Platform | Command |
+|-----------|----------|---------|
+| Frontend | Netlify | `netlify deploy --prod` |
+| Cinema Backend | Fly.io | `./cinema/deploy.sh <movie>` |
+| Session Registry | Convex | `npx convex deploy` |
+| Assets | Tigris CDN | `scripts/local/upload-worlds-to-tigris.sh` |
+
+**Full deployment:**
+```bash
+./cinema/theater-deploy.sh bigtrouble --netlify-site cozytheatership
+```
+
+**Directory Structure:**
+```
+scripts/local/           # User-specific scripts (gitignored)
+cinema/                  # Theater deployment scripts
+convex/                  # Convex backend functions
+public/lobby/            # Session browser (deployed with frontend)
+docs/deployment-guide.md # Detailed deployment docs
+```
 
 ---
 
 ## Tips for AI Assistants
 
-1. **Read relevant files before making changes** - especially `character-manager.js` for character work, `proto.js` for world/portal work.
+1. **Read relevant files before making changes** - especially `character-manager.js` for character work, `proto.js` for world/portal work, `multiplayer/` for session work.
 
 2. **Test coordinate systems** - Position bugs are common. Log positions liberally.
 
@@ -493,13 +751,18 @@ setConfig('debug.showFps', true);
 7. **Use existing patterns**:
    - `timeless.js` - Walking characters with sounds
    - `old-man.js` - Proximity reactions  
-   - `amy.js` - Waypoint graph pathing + AI chat integration
+   - `ybot.js` - Waypoint graph pathing + AI commentary + cinema mode
 
 8. **VR coordinate spaces** - WebXR poses are in XR reference space. Transform to world space via `localFrame.matrixWorld` before using in Three.js. See `vr-chat.js` for examples.
 
-9. **AI is optional** - Chat features require Braintrust API key. Always check `config.ai.enabled` and fall back gracefully to stock phrases.
+9. **AI is optional** - Chat features require `BRAINTRUST_API_KEY` set in Convex. Always check `config.ai.enabled` and fall back gracefully to stock phrases.
+
+10. **Multiplayer is host-authoritative** - NPCs run only on host. Viewers receive state via `character-sync.js`.
+
+11. **Check Fly.io logs** - `fly logs -a <app-name>` for backend debugging.
+
+12. **Git safety** - Never run destructive git commands (`reset --hard`, `clean -fd`) without explicit user approval.
 
 ---
 
 *Last updated: January 2026*
-

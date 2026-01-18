@@ -41,6 +41,13 @@ if [ "$LOOP" = "true" ]; then
     CMD="$CMD --loop-playback"
 fi
 
+# Optional: start at a specific time (in seconds)
+# Set via: fly secrets set START_TIME=300 -a <app-name>
+if [ -n "$START_TIME" ]; then
+    CMD="$CMD --start $START_TIME"
+    echo "Starting at time: ${START_TIME}s"
+fi
+
 echo "Running: $CMD"
 eval $CMD &
 FOUNDRY_PID=$!

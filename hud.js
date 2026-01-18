@@ -645,6 +645,85 @@ export function setCinemaButtonVisible(visible) {
     }
 }
 
+// ========== Playback Pause Button (Host only, when movie is playing) ==========
+let playbackPaused = false;
+let playbackPauseCallback = null;
+
+/**
+ * Create playback pause button (below cinema toggle, hidden by default)
+ * @param {Function} onToggle - Callback function called when playback is toggled
+ */
+export function createPlaybackPauseButton(onToggle) {
+    playbackPauseCallback = onToggle;
+    
+    const button = document.createElement("button");
+    button.id = "playback-pause-toggle";
+    button.style.cssText = `
+        position: fixed;
+        top: 310px;
+        left: 10px;
+        width: 40px;
+        height: 40px;
+        background: rgba(0, 0, 0, 0.7);
+        border: 2px solid rgba(255, 200, 0, 0.5);
+        border-radius: 50%;
+        color: white;
+        font-size: 18px;
+        cursor: pointer;
+        z-index: 1001;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    `;
+    button.addEventListener("click", () => {
+        if (playbackPauseCallback) {
+            playbackPauseCallback();
+        }
+    });
+    button.addEventListener("mouseenter", () => {
+        button.style.background = "rgba(0, 0, 0, 0.9)";
+        button.style.borderColor = "rgba(255, 200, 0, 0.8)";
+    });
+    button.addEventListener("mouseleave", () => {
+        button.style.background = "rgba(0, 0, 0, 0.7)";
+        button.style.borderColor = "rgba(255, 200, 0, 0.5)";
+    });
+    
+    updatePlaybackPauseButton(button);
+    document.body.appendChild(button);
+}
+
+/**
+ * Update the playback pause button icon
+ */
+function updatePlaybackPauseButton(button = null) {
+    const btn = button || document.getElementById("playback-pause-toggle");
+    if (!btn) return;
+    
+    // ⏸️ = paused, ▶️ = playing
+    btn.textContent = playbackPaused ? "▶️" : "⏸️";
+    btn.title = playbackPaused ? "Movie PAUSED (click to play)" : "Movie PLAYING (click to pause)";
+}
+
+/**
+ * Set playback paused state (updates button icon)
+ */
+export function setPlaybackPaused(paused) {
+    playbackPaused = paused;
+    updatePlaybackPauseButton();
+}
+
+/**
+ * Show/hide playback pause button (only visible when host has movie playing)
+ */
+export function setPlaybackButtonVisible(visible) {
+    const btn = document.getElementById("playback-pause-toggle");
+    if (btn) {
+        btn.style.display = visible ? "flex" : "none";
+    }
+}
+
 const worldPos = new THREE.Vector3();
 const worldQuat = new THREE.Quaternion();
 const euler = new THREE.Euler();
