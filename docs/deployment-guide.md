@@ -4,6 +4,55 @@ This guide covers the full deployment of Protoverse Theater, a multiplayer VR mo
 
 > **Note**: This guide uses example URLs (e.g., `cozytheatership.netlify.app`, `ardent-chameleon-122.convex.site`). Replace these with your own deployment URLs. See `.env.example` for environment variable configuration.
 
+## Why This Architecture (and Why It Documents Well in GitBook)
+
+ProtoVerse uses a modular architecture by design:
+
+- **Frontend runtime** for world rendering, controls, VR, and interaction.
+- **WebSocket relay** for real-time multiplayer state and session sync.
+- **Convex backend** for session registry, lobby APIs, and secure AI proxy endpoints.
+- **Braintrust** for AI prompt management and iteration.
+- **World data + project presets** for reusable world building and multiple deployment modes.
+
+This stack was chosen because it is more stable and easier to operate than earlier, more framework-heavy experiments. It has fewer moving parts in the core runtime, fewer hidden dependencies, and clearer boundaries between world logic, multiplayer, and backend services.
+
+### Current Milestone Status (Research Phase)
+
+This project should be read as a **work in progress** and an active **research-phase system**.
+
+The current milestone validates:
+
+1. A modular architecture for building multiple world spaces on one runtime
+2. An immersive 3D space for learning and guided experiences
+3. Realtime multiplayer/session infrastructure
+4. AI backend patterns using Convex + Braintrust
+5. Wallet integration (including Leather and Xverse) and foundations for token-gated access
+6. Documentation patterns that can scale in GitBook as the project grows
+
+The goal is not a final locked architecture yet; the goal is to build and evaluate a foundation that supports many more world spaces over time.
+
+### LiveKit Evaluation (Realtime Audio)
+
+Realtime voice/audio integration is still being evaluated.
+
+- Current stack already supports world audio and spatial playback.
+- The team is evaluating **LiveKit** for improved multiplayer voice reliability and lower-latency audio.
+- A likely direction is to keep existing game/session sync in the current WS stack and add LiveKit as a dedicated voice layer if it improves quality and developer ergonomics.
+
+### GitBook Documentation Fit
+
+This architecture is especially good for GitBook because each system maps to a clear documentation chapter:
+
+1. **World Building** (world JSON, portals, characters, audio)
+2. **Runtime Architecture** (scene, controls, physics, rendering)
+3. **Multiplayer + Streaming** (WS relay, Foundry, sync)
+4. **AI Layer** (Convex proxy + Braintrust prompts)
+5. **Wallet / Access** (Stacks wallets incl. Leather/Xverse, token-gated access)
+6. **Configuration & Modes** (`config.js`, `projects/*`, `.env.*`)
+7. **Deployment** (Netlify, Fly.io, Convex, CDN)
+
+This makes it easier to maintain grant-facing documentation as the project grows: each subsystem can evolve without rewriting the full docs set.
+
 ## System Architecture
 
 ```
@@ -100,7 +149,7 @@ npm run build:theater    # Production build with theater preset
 Configuration is merged from two sources:
 
 1. **Environment files** (`.env`, `.env.theater`, `.env.demo`) - URLs and secrets
-2. **Config presets** (`configs/*.js`) - App behavior settings
+2. **Config presets** (`projects/*/config.js`) - App behavior settings
 
 ```
 .env                    # Shared defaults (all modes)
@@ -150,7 +199,7 @@ public/worlds/cozyship/
 
 Then point to different configs:
 ```javascript
-// configs/helloworld.js
+// projects/helloworld/config.js
 export default {
     world: {
         rootWorld: "/cozyship/helloworld.json",

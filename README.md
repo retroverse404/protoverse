@@ -42,7 +42,7 @@ background music per world.
 ```bash
 npm install
 npm run dev
-# Open http://localhost:3000
+# Open http://localhost:3002
 ```
 
 ## Configuration
@@ -111,11 +111,70 @@ npx convex env set BRAINTRUST_API_KEY sk-your-key-here
 
 See [docs/deployment-guide.md](docs/deployment-guide.md) for full setup instructions.
 
+## Why This Architecture
+
+ProtoVerse uses a focused architecture for modular world building:
+
+- **Direct control over the runtime** (rendering, physics, portals, multiplayer, VR).
+- **Fewer dependencies** than earlier platform-heavy attempts.
+- **Better stability** for iterative world building and testing.
+- **Data-driven worlds** (`world.json`) for reusable, composable world modules.
+- **Config presets** (`projects/*`) for multiple experiences on one codebase.
+- **Optional backend services** instead of hard-coupling everything into one stack.
+
+This approach was chosen because it is easier to debug, easier to document, and more reliable for shipping grant milestones than earlier experiments built around more complex orchestration layers (for example, Hyperfy- or ElizaOS-centered workflows).
+
+### Current Milestone Framing (Work in Progress)
+
+ProtoVerse is currently a **work in progress** and in an active **research phase**.
+
+This milestone is focused on validating:
+
+- A stable modular world-building architecture.
+- An immersive 3D space for learning and guided exploration.
+- Reusable world spaces built from shared runtime systems.
+- Real-time multiplayer/session infrastructure.
+- AI integration patterns (Convex + Braintrust).
+- Wallet and token integration foundations (including token-gated access).
+- Stacks wallet support including Leather and Xverse.
+- Documentation structure suitable for GitBook and future contributors.
+
+The near-term goal is to use this architecture to build **more world spaces** on top of the same core runtime, rather than rebuilding the stack per experience.
+
+### Backend Choice (Convex + Braintrust)
+
+- **Convex** handles session registry, lobby data, and secure HTTP endpoints.
+- **Braintrust** manages AI prompt workflows and evaluation-friendly prompt iteration.
+- **Convex + Braintrust together** keep API keys server-side while keeping AI features modular.
+
+### Realtime Audio Research (LiveKit Evaluation)
+
+Realtime audio is still under active evaluation.
+
+- Current audio systems support world audio and spatial playback.
+- Live multiplayer voice is a research area for improved integration.
+- **LiveKit is being evaluated** as a candidate for better low-latency voice and stronger audio reliability (especially for multiplayer and VR use cases).
+- The likely direction is to keep game/session sync in the current stack and use LiveKit as an optional dedicated voice layer.
+
+### Why This Helps GitBook Documentation
+
+This architecture maps cleanly to GitBook sections:
+
+- **Frontend Runtime** (`main.js`, `scene.js`, `proto.js`, `physics.js`)
+- **World Authoring** (`public/worlds/*/world.json`, portals, characters, audio)
+- **Project Presets / Modes** (`projects/*`, `config.js`, `.env.*`)
+- **Multiplayer + Streaming** (`multiplayer/*`, Foundry integration)
+- **Backend Services** (`convex/*`, Braintrust prompt flow)
+- **Wallet / Access Layer** (Stacks wallet integration, Leather/Xverse support, token-gated access)
+- **Deployment** (Netlify / Fly.io / Convex / CDN)
+
+Because the boundaries are explicit, documentation can be written as modular chapters instead of one long setup document.
+
 ## Documentation
 
 - [AICodeGuide.md](AICodeGuide.md) - Architecture and code guide
 - [docs/deployment-guide.md](docs/deployment-guide.md) - Deployment instructions
-- [cinema/README.md](cinema/README.md) - Movie theater setup
+- [projects/theater/README.md](projects/theater/README.md) - Movie theater setup
 
 ## Project Structure
 
